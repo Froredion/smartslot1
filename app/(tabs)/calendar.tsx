@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, FlatList } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import CalendarStrip from 'react-native-calendar-strip';
 import { format, addDays, isSameDay, isValid } from 'date-fns';
@@ -28,6 +28,7 @@ export default function Calendar() {
   const insets = useSafeAreaInsets();
   const [selectedDate, setSelectedDate] = useState<Date | null>(new Date());
   const [modalVisible, setModalVisible] = useState(false);
+  const [selectedAsset, setSelectedAsset] = useState<string | null>(null);
 
   // Calculate availability for a specific date
   const getDateAvailability = (date: Date | null) => {
@@ -69,8 +70,10 @@ export default function Calendar() {
 
   const handleDateSelect = (date: Date) => {
     if (isValid(date)) {
+      console.log('Date selected:', date);
       setSelectedDate(date);
       setModalVisible(true);
+      console.log('Modal visibility set to true');
     }
   };
 
@@ -90,8 +93,48 @@ export default function Calendar() {
     )
   );
 
+  const renderAssetItem = ({ item: asset }) => {
+    const isBooked = MOCK_BOOKINGS.some(booking => 
+      booking.assetId === asset.id && selectedDate && isSameDay(booking.date, selectedDate)
+    );
+    
+    return (
+      <TouchableOpacity
+        style={styles.assetCard}
+        onPress={() => {
+          setSelectedAsset(asset.id);
+          setModalVisible(true);
+        }}
+        disabled={isBooked}
+      >
+        <View style={styles.assetHeader}>
+          <Text style={styles.assetName}>{asset.name}</Text>
+          <View style={[
+            styles.statusBadge,
+            { backgroundColor: isBooked ? '#FFE5E5' : '#E5FFE5' }
+          ]}>
+            <View style={[
+              styles.statusDot,
+              { backgroundColor: isBooked ? '#FF3B30' : '#34C759' }
+            ]} />
+            <Text style={[
+              styles.assetStatus,
+              { color: isBooked ? '#FF3B30' : '#34C759' }
+            ]}>
+              {isBooked ? 'Booked' : 'Available'}
+            </Text>
+          </View>
+        </View>
+        <Text style={styles.assetType}>{asset.type}</Text>
+        <Text style={styles.assetPrice}>${asset.pricePerDay} per day</Text>
+      </TouchableOpacity>
+    );
+  };
+
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
+      {console.log('Current selectedDate:', selectedDate)}
+      {console.log('Current modalVisible:', modalVisible)}
       <View style={styles.header}>
         <Text style={styles.title}>Book an Asset</Text>
       </View>
@@ -131,13 +174,21 @@ export default function Calendar() {
         </View>
       </View>
 
+      <FlatList
+        data={MOCK_ASSETS}
+        renderItem={renderAssetItem}
+        keyExtractor={item => item.id}
+        contentContainerStyle={styles.listContainer}
+        showsVerticalScrollIndicator={false}
+      />
+
       {selectedDate && (
         <BookingModal
           visible={modalVisible}
           onClose={() => setModalVisible(false)}
           onConfirm={handleBookingConfirm}
           selectedDate={selectedDate}
-          assets={MOCK_ASSETS}
+          assets={[MOCK_ASSETS.find(a => a.id === selectedAsset)].filter(Boolean)}
           bookings={MOCK_BOOKINGS}
         />
       )}
@@ -215,5 +266,58 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#666',
     fontWeight: '500',
+  },
+  listContainer: {
+    padding: 20,
+  },
+  assetCard: {
+    backgroundColor: 'white',
+    borderRadius: 12,
+    padding: 15,
+    marginBottom: 15,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  assetHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  assetName: {
+    fontSize: 18,
+    fontWeight: '600',
+    flex: 1,
+    marginRight: 8,
+  },
+  assetType: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 4,
+  },
+  statusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 6,
+  },
+  assetStatus: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  assetPrice: {
+    fontSize: 14,
+    color: '#007AFF',
+    fontWeight: '600',
   },
 });

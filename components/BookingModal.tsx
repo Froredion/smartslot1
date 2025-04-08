@@ -5,9 +5,10 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  ScrollView,
   Platform,
   Image,
+  FlatList,
+  Dimensions,
 } from 'react-native';
 import { X } from 'lucide-react-native';
 import { format, isSameDay } from 'date-fns';
@@ -63,6 +64,65 @@ export function BookingModal({
     }
   };
 
+  const renderAssetItem = ({ item: asset }: { item: Asset }) => {
+    const isBooked = isAssetBooked(asset.id);
+    const isSelected = selectedAsset === asset.id;
+    
+    return (
+      <TouchableOpacity
+        style={[
+          styles.assetCard,
+          isSelected && styles.selectedAsset,
+          isBooked && styles.bookedAsset,
+        ]}
+        onPress={() => !isBooked && setSelectedAsset(asset.id)}
+        disabled={isBooked}
+      >
+        <View style={styles.assetHeader}>
+          <Text style={[
+            styles.assetName,
+            isBooked && styles.bookedText
+          ]}>
+            {asset.name}
+          </Text>
+          <View style={[
+            styles.statusBadge,
+            { backgroundColor: isBooked ? '#FFE5E5' : '#E5FFE5' }
+          ]}>
+            <View style={[
+              styles.statusDot,
+              { backgroundColor: isBooked ? '#FF3B30' : '#34C759' }
+            ]} />
+            <Text style={[
+              styles.assetStatus,
+              { color: isBooked ? '#FF3B30' : '#34C759' }
+            ]}>
+              {isBooked ? 'Booked' : 'Available'}
+            </Text>
+          </View>
+        </View>
+        <Text style={[
+          styles.assetType,
+          isBooked && styles.bookedText
+        ]}>
+          {asset.type}
+        </Text>
+        <Text style={[
+          styles.assetPrice,
+          isBooked && styles.bookedText
+        ]}>
+          ${asset.pricePerDay} per day
+        </Text>
+        {!isBooked && (
+          <View style={[
+            styles.checkmark,
+            isSelected && styles.selectedCheckmark
+          ]} />
+        )}
+      </TouchableOpacity>
+    );
+  };
+
   return (
     <Modal
       visible={visible}
@@ -83,85 +143,13 @@ export function BookingModal({
             {format(selectedDate, "EEEE, MMMM d, yyyy")}
           </Text>
 
-          <View style={styles.assetListContainer}>
-            <ScrollView 
-              style={styles.assetList}
-              contentContainerStyle={styles.assetListContent}
-              showsVerticalScrollIndicator={false}
-            >
-              {assets.map((asset) => {
-                const isBooked = isAssetBooked(asset.id);
-                const isSelected = selectedAsset === asset.id;
-                
-                return (
-                  <View key={asset.id} style={styles.assetItemContainer}>
-                    <TouchableOpacity
-                      style={[
-                        styles.assetItem,
-                        isSelected && styles.selectedAsset,
-                        isBooked && styles.bookedAsset,
-                      ]}
-                      onPress={() => !isBooked && setSelectedAsset(asset.id)}
-                      disabled={isBooked}
-                    >
-                      <Image
-                        source={{ uri: assetImages[asset.type as keyof typeof assetImages] }}
-                        style={[
-                          styles.assetImage,
-                          isBooked && styles.bookedAssetImage
-                        ]}
-                      />
-                      <View style={styles.assetContent}>
-                        <View style={styles.assetHeader}>
-                          <Text style={[
-                            styles.assetName,
-                            isBooked && styles.bookedText
-                          ]}>
-                            {asset.name}
-                          </Text>
-                          <View style={[
-                            styles.statusBadge,
-                            { backgroundColor: isBooked ? '#FFE5E5' : '#E5FFE5' }
-                          ]}>
-                            <View style={[
-                              styles.statusDot,
-                              { backgroundColor: isBooked ? '#FF3B30' : '#34C759' }
-                            ]} />
-                            <Text style={[
-                              styles.assetStatus,
-                              { color: isBooked ? '#FF3B30' : '#34C759' }
-                            ]}>
-                              {isBooked ? 'Booked' : 'Available'}
-                            </Text>
-                          </View>
-                        </View>
-                        
-                        <Text style={[
-                          styles.assetType,
-                          isBooked && styles.bookedText
-                        ]}>
-                          {asset.type}
-                        </Text>
-                        
-                        <Text style={[
-                          styles.assetPrice,
-                          isBooked && styles.bookedText
-                        ]}>
-                          ${asset.pricePerDay} per day
-                        </Text>
-                      </View>
-                      {!isBooked && (
-                        <View style={[
-                          styles.checkmark,
-                          isSelected && styles.selectedCheckmark
-                        ]} />
-                      )}
-                    </TouchableOpacity>
-                  </View>
-                );
-              })}
-            </ScrollView>
-          </View>
+          <FlatList
+            data={assets}
+            renderItem={renderAssetItem}
+            keyExtractor={item => item.id}
+            contentContainerStyle={styles.assetListContent}
+            showsVerticalScrollIndicator={false}
+          />
 
           {selectedAsset && (
             <View style={styles.summaryContainer}>
@@ -194,11 +182,20 @@ export function BookingModal({
   );
 }
 
+const { width } = Dimensions.get('window');
+const cardWidth = (width - 48) / 2; // 48 = padding (16) * 2 + gap (16)
+
 const styles = StyleSheet.create({
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'flex-end',
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 1000,
   },
   modalContent: {
     backgroundColor: 'white',
@@ -207,6 +204,8 @@ const styles = StyleSheet.create({
     paddingTop: 20,
     height: '80%',
     paddingBottom: Platform.OS === 'ios' ? 40 : 20,
+    position: 'relative',
+    zIndex: 1001,
   },
   modalHeader: {
     flexDirection: 'row',
@@ -229,36 +228,20 @@ const styles = StyleSheet.create({
     marginBottom: 20,
     fontWeight: '600',
   },
-  assetListContainer: {
-    flex: 1,
-    marginBottom: 20,
-    width: '100%',
-  },
-  assetList: {
-    flex: 1,
-    width: '100%',
-  },
   assetListContent: {
-    padding: 16,
-    gap: 16,
-    flexGrow: 1,
+    padding: 20,
   },
-  assetItemContainer: {
+  assetCard: {
     backgroundColor: 'white',
-    borderRadius: 16,
+    borderRadius: 12,
+    padding: 15,
+    marginBottom: 15,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
-    width: '100%',
-  },
-  assetItem: {
-    flexDirection: 'row',
-    padding: 12,
-    borderRadius: 16,
-    backgroundColor: 'white',
-    overflow: 'hidden',
+    position: 'relative',
   },
   selectedAsset: {
     backgroundColor: '#F0F8FF',
@@ -268,23 +251,11 @@ const styles = StyleSheet.create({
   bookedAsset: {
     backgroundColor: '#f8f8f8',
   },
-  bookedAssetImage: {
-    opacity: 0.6,
-  },
-  assetImage: {
-    width: 100,
-    height: 100,
-    borderRadius: 12,
-  },
-  assetContent: {
-    flex: 1,
-    marginLeft: 12,
-    justifyContent: 'space-between',
-  },
   assetHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
+    alignItems: 'center',
+    marginBottom: 8,
   },
   assetName: {
     fontSize: 18,
@@ -295,7 +266,7 @@ const styles = StyleSheet.create({
   assetType: {
     fontSize: 14,
     color: '#666',
-    marginTop: 4,
+    marginBottom: 4,
   },
   statusBadge: {
     flexDirection: 'row',
@@ -311,26 +282,26 @@ const styles = StyleSheet.create({
     marginRight: 6,
   },
   assetStatus: {
-    fontSize: 12,
-    fontWeight: '600',
+    fontSize: 14,
+    fontWeight: '500',
   },
   assetPrice: {
-    fontSize: 16,
+    fontSize: 14,
     color: '#007AFF',
     fontWeight: '600',
-    marginTop: 8,
   },
   bookedText: {
     opacity: 0.6,
   },
   checkmark: {
+    position: 'absolute',
+    top: 15,
+    right: 15,
     width: 24,
     height: 24,
     borderRadius: 12,
     borderWidth: 2,
     borderColor: '#ddd',
-    marginLeft: 12,
-    alignSelf: 'center',
   },
   selectedCheckmark: {
     backgroundColor: '#007AFF',
