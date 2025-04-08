@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Modal,
   View,
@@ -9,27 +9,38 @@ import {
   Image,
   FlatList,
   Dimensions,
+  TextInput,
+  ScrollView,
 } from 'react-native';
-import { X } from 'lucide-react-native';
+import { X, User, Users, DollarSign, Info, ChevronDown } from 'lucide-react-native';
 import { format, isSameDay } from 'date-fns';
+import * as Localization from 'expo-localization';
+import { CurrencySelector } from './CurrencySelector';
+import { getCurrencyFromCountry, getCountryFromLocation } from '../utils/currencyUtils';
 
 interface Asset {
   id: string;
   name: string;
   type: string;
   pricePerDay: number;
+  currency: string;
 }
 
 interface Booking {
   id: string;
   assetId: string;
   date: Date;
+  description?: string;
+  bookedBy?: string;
+  numberOfPeople?: number;
+  customPrice?: number;
+  currency?: string;
 }
 
 interface BookingModalProps {
   visible: boolean;
   onClose: () => void;
-  onConfirm: (assetId: string) => void;
+  onConfirm: (bookingDetails: Omit<Booking, 'id'>) => void;
   selectedDate: Date;
   assets: Asset[];
   bookings: Booking[];
@@ -50,18 +61,119 @@ export function BookingModal({
   bookings,
 }: BookingModalProps) {
   const [selectedAsset, setSelectedAsset] = useState<string | null>(null);
+  const [currencySelectorVisible, setCurrencySelectorVisible] = useState(false);
+  const [userCountry, setUserCountry] = useState<string | null>(null);
+  const [bookingDetails, setBookingDetails] = useState({
+    description: '',
+    bookedBy: '',
+    numberOfPeople: '',
+    customPrice: '',
+    currency: 'USD', // Default to USD
+  });
+
+  useEffect(() => {
+    const detectUserCountry = async () => {
+      try {
+        // First try to get country from location
+        const countryFromLocation = await getCountryFromLocation();
+        console.log('BookingModal - Country from location:', countryFromLocation);
+
+        if (countryFromLocation) {
+          setUserCountry(countryFromLocation);
+          const countryCurrency = getCurrencyFromCountry(countryFromLocation);
+          console.log('BookingModal - Setting currency based on location:', {
+            countryCode: countryFromLocation,
+            countryCurrency
+          });
+          setBookingDetails(prev => ({ ...prev, currency: countryCurrency }));
+          return;
+        }
+
+        // If location detection fails, fall back to locale detection
+        const locales = await Localization.getLocales();
+        console.log('BookingModal - Falling back to locale detection:', JSON.stringify(locales, null, 2));
+        
+        if (locales && locales.length > 0) {
+          // First try to find a US locale
+          const usLocale = locales.find(locale => locale.regionCode === 'US');
+          const primaryLocale = usLocale || locales[0];
+          
+          console.log('BookingModal - Primary locale details:', {
+            languageCode: primaryLocale.languageCode,
+            regionCode: primaryLocale.regionCode,
+            measurementSystem: primaryLocale.measurementSystem,
+            textDirection: primaryLocale.textDirection,
+            decimalSeparator: primaryLocale.decimalSeparator,
+            digitGroupingSeparator: primaryLocale.digitGroupingSeparator,
+          });
+          
+          // Try to get country code from regionCode first
+          let countryCode = primaryLocale.regionCode;
+          console.log('BookingModal - Initial country code from regionCode:', countryCode);
+          
+          // If regionCode is not available, try to extract from languageCode
+          if (!countryCode && primaryLocale.languageCode) {
+            const parts = primaryLocale.languageCode.split('-');
+            console.log('BookingModal - Language code parts:', parts);
+            if (parts.length > 1) {
+              countryCode = parts[1].toUpperCase();
+              console.log('BookingModal - Country code extracted from language code:', countryCode);
+            }
+          }
+          
+          console.log('BookingModal - Final country code:', countryCode);
+          
+          if (countryCode) {
+            setUserCountry(countryCode);
+            const countryCurrency = getCurrencyFromCountry(countryCode);
+            console.log('BookingModal - Setting currency based on locale:', {
+              countryCode,
+              countryCurrency
+            });
+            setBookingDetails(prev => ({ ...prev, currency: countryCurrency }));
+          } else {
+            console.log('BookingModal - No country code detected, using USD as default');
+            setBookingDetails(prev => ({ ...prev, currency: 'USD' }));
+          }
+        } else {
+          console.log('BookingModal - No locales detected, using USD as default');
+          setBookingDetails(prev => ({ ...prev, currency: 'USD' }));
+        }
+      } catch (error) {
+        console.error('BookingModal - Error detecting country:', error);
+        // If country detection fails, use USD
+        setBookingDetails(prev => ({ ...prev, currency: 'USD' }));
+      }
+    };
+    detectUserCountry();
+  }, []);
+
+  const handleConfirm = () => {
+    if (selectedAsset) {
+      onConfirm({
+        assetId: selectedAsset,
+        date: selectedDate,
+        description: bookingDetails.description,
+        bookedBy: bookingDetails.bookedBy,
+        numberOfPeople: bookingDetails.numberOfPeople ? parseInt(bookingDetails.numberOfPeople) : undefined,
+        customPrice: bookingDetails.customPrice ? parseFloat(bookingDetails.customPrice) : undefined,
+        currency: bookingDetails.currency,
+      });
+      setSelectedAsset(null);
+      setBookingDetails({
+        description: '',
+        bookedBy: '',
+        numberOfPeople: '',
+        customPrice: '',
+        currency: 'USD', // Reset to default
+      });
+    }
+  };
 
   const isAssetBooked = (assetId: string) => {
     return bookings.some(booking => 
       booking.assetId === assetId && isSameDay(booking.date, selectedDate)
     );
-  };
-
-  const handleConfirm = () => {
-    if (selectedAsset) {
-      onConfirm(selectedAsset);
-      setSelectedAsset(null);
-    }
   };
 
   const renderAssetItem = ({ item: asset }: { item: Asset }) => {
@@ -111,7 +223,7 @@ export function BookingModal({
           styles.assetPrice,
           isBooked && styles.bookedText
         ]}>
-          ${asset.pricePerDay} per day
+          {asset.currency} {asset.pricePerDay} per day
         </Text>
         {!isBooked && (
           <View style={[
@@ -152,19 +264,72 @@ export function BookingModal({
           />
 
           {selectedAsset && (
-            <View style={styles.summaryContainer}>
-              <Text style={styles.summaryTitle}>Booking Summary</Text>
-              <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>Duration</Text>
-                <Text style={styles.summaryValue}>1 day</Text>
+            <ScrollView style={styles.bookingDetailsContainer}>
+              <Text style={styles.sectionTitle}>Booking Details</Text>
+              
+              <View style={styles.inputGroup}>
+                <View style={styles.inputLabel}>
+                  <Info size={16} color="#666" />
+                  <Text style={styles.labelText}>Description</Text>
+                </View>
+                <TextInput
+                  style={styles.input}
+                  value={bookingDetails.description}
+                  onChangeText={(text) => setBookingDetails(prev => ({ ...prev, description: text }))}
+                  placeholder="Enter booking description"
+                />
               </View>
-              <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>Total Price</Text>
-                <Text style={styles.summaryValue}>
-                  ${assets.find(a => a.id === selectedAsset)?.pricePerDay}
-                </Text>
+
+              <View style={styles.inputGroup}>
+                <View style={styles.inputLabel}>
+                  <User size={16} color="#666" />
+                  <Text style={styles.labelText}>Booked By</Text>
+                </View>
+                <TextInput
+                  style={styles.input}
+                  value={bookingDetails.bookedBy}
+                  onChangeText={(text) => setBookingDetails(prev => ({ ...prev, bookedBy: text }))}
+                  placeholder="Enter name"
+                />
               </View>
-            </View>
+
+              <View style={styles.inputGroup}>
+                <View style={styles.inputLabel}>
+                  <Users size={16} color="#666" />
+                  <Text style={styles.labelText}>Number of People</Text>
+                </View>
+                <TextInput
+                  style={styles.input}
+                  value={bookingDetails.numberOfPeople}
+                  onChangeText={(text) => setBookingDetails(prev => ({ ...prev, numberOfPeople: text }))}
+                  placeholder="Enter number of people"
+                  keyboardType="numeric"
+                />
+              </View>
+
+              <View style={styles.inputGroup}>
+                <View style={styles.inputLabel}>
+                  <DollarSign size={16} color="#666" />
+                  <Text style={styles.labelText}>Custom Price</Text>
+                </View>
+                <View style={styles.priceInputContainer}>
+                  <TextInput
+                    style={[styles.input, styles.priceInput]}
+                    value={bookingDetails.customPrice}
+                    onChangeText={(text) => setBookingDetails(prev => ({ ...prev, customPrice: text }))}
+                    placeholder="Enter custom price"
+                    keyboardType="numeric"
+                  />
+                  <TouchableOpacity
+                    style={styles.currencyButton}
+                    onPress={() => setCurrencySelectorVisible(true)}
+                  >
+                    <Text style={styles.currencyButtonText}>{bookingDetails.currency}</Text>
+                    <ChevronDown size={16} color="#666" />
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </ScrollView>
           )}
 
           <TouchableOpacity
@@ -176,6 +341,13 @@ export function BookingModal({
               {selectedAsset ? 'Confirm Booking' : 'Select an Available Asset'}
             </Text>
           </TouchableOpacity>
+
+          <CurrencySelector
+            visible={currencySelectorVisible}
+            onClose={() => setCurrencySelectorVisible(false)}
+            onSelect={(currency) => setBookingDetails(prev => ({ ...prev, currency }))}
+            currentCurrency={bookingDetails.currency}
+          />
         </View>
       </View>
     </Modal>
@@ -345,5 +517,61 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 16,
     fontWeight: '600',
+  },
+  bookingDetailsContainer: {
+    padding: 20,
+    backgroundColor: '#f8f8ff',
+    marginHorizontal: 20,
+    borderRadius: 12,
+    maxHeight: 300,
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 16,
+  },
+  inputGroup: {
+    marginBottom: 16,
+  },
+  inputLabel: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  labelText: {
+    marginLeft: 8,
+    color: '#666',
+    fontSize: 14,
+  },
+  input: {
+    backgroundColor: 'white',
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 16,
+  },
+  priceInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  priceInput: {
+    flex: 1,
+  },
+  currencyButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f5f5f5',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#ddd',
+  },
+  currencyButtonText: {
+    fontSize: 14,
+    color: '#333',
+    marginRight: 4,
   },
 });

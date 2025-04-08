@@ -19,7 +19,28 @@ const SAMPLE_ASSETS: Asset[] = [
   { id: '3', name: 'Villa Paradise', type: 'Property', status: 'Available', description: 'Beachfront property' },
 ];
 
-const DEFAULT_CATEGORIES = ['Vehicle', 'Room', 'Property'];
+const DEFAULT_CATEGORIES = [
+  'Vehicle',
+  'Room',
+  'Property',
+  'Equipment',
+  'Electronics',
+  'Furniture',
+  'Tools',
+  'Office',
+  'Storage',
+  'Outdoor',
+  'Kitchen',
+  'Sports',
+  'Audio',
+  'Video',
+  'Gaming',
+  'Medical',
+  'Laboratory',
+  'Workshop',
+  'Event',
+  'Transportation'
+];
 
 export default function Assets() {
   const insets = useSafeAreaInsets();
@@ -28,6 +49,7 @@ export default function Assets() {
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
+  const [isNewAsset, setIsNewAsset] = useState(false);
 
   const handleAddCategory = (category: string) => {
     if (!categories.includes(category)) {
@@ -44,13 +66,24 @@ export default function Assets() {
 
   const handleEditAsset = (asset: Asset) => {
     setSelectedAsset(asset);
+    setIsNewAsset(false);
+    setEditModalVisible(true);
+  };
+
+  const handleCreateAsset = () => {
+    setSelectedAsset(null);
+    setIsNewAsset(true);
     setEditModalVisible(true);
   };
 
   const handleSaveAsset = (updatedAsset: Asset) => {
-    setAssets(assets.map(asset => 
-      asset.id === updatedAsset.id ? updatedAsset : asset
-    ));
+    if (isNewAsset) {
+      setAssets([...assets, updatedAsset]);
+    } else {
+      setAssets(assets.map(asset => 
+        asset.id === updatedAsset.id ? updatedAsset : asset
+      ));
+    }
   };
 
   const handleDeleteAsset = (assetId: string) => {
@@ -86,7 +119,10 @@ export default function Assets() {
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.header}>
         <Text style={styles.title}>Your Assets</Text>
-        <TouchableOpacity style={styles.addButton}>
+        <TouchableOpacity 
+          style={styles.addButton}
+          onPress={handleCreateAsset}
+        >
           <Plus size={24} color="white" />
         </TouchableOpacity>
       </View>
@@ -97,7 +133,7 @@ export default function Assets() {
         onDeleteCategory={handleDeleteCategory}
       />
 
-      <ScrollView style={styles.categoryFilter}>
+      <View style={styles.categoryFilter}>
         <TouchableOpacity
           style={[
             styles.categoryButton,
@@ -125,7 +161,7 @@ export default function Assets() {
             ]}>{category}</Text>
           </TouchableOpacity>
         ))}
-      </ScrollView>
+      </View>
 
       <FlatList
         data={filteredAssets}
@@ -139,10 +175,13 @@ export default function Assets() {
         onClose={() => {
           setEditModalVisible(false);
           setSelectedAsset(null);
+          setIsNewAsset(false);
         }}
         onSave={handleSaveAsset}
         onDelete={handleDeleteAsset}
         asset={selectedAsset}
+        categories={categories}
+        isNewAsset={isNewAsset}
       />
     </View>
   );
@@ -175,13 +214,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     paddingHorizontal: 20,
     marginBottom: 20,
+    flexWrap: 'wrap',
+    gap: 8,
   },
   categoryButton: {
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 20,
     backgroundColor: '#f0f0f0',
-    marginRight: 8,
   },
   selectedCategory: {
     backgroundColor: '#007AFF',

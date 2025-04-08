@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -6,9 +6,9 @@ import {
   TouchableOpacity,
   TextInput,
   Modal,
-  FlatList,
+  ScrollView,
 } from 'react-native';
-import { Plus, X, Trash2 } from 'lucide-react-native';
+import { Plus, X, Check, Search } from 'lucide-react-native';
 
 interface CategoryManagerProps {
   categories: string[];
@@ -21,53 +21,77 @@ export function CategoryManager({
   onAddCategory,
   onDeleteCategory,
 }: CategoryManagerProps) {
-  const [modalVisible, setModalVisible] = useState(false);
+  const [addModalVisible, setAddModalVisible] = useState(false);
+  const [removeModalVisible, setRemoveModalVisible] = useState(false);
   const [newCategory, setNewCategory] = useState('');
+  const [selectedToRemove, setSelectedToRemove] = useState<Set<string>>(new Set());
+  const [searchQuery, setSearchQuery] = useState('');
 
   const handleAddCategory = () => {
     if (newCategory.trim()) {
       onAddCategory(newCategory.trim());
       setNewCategory('');
-      setModalVisible(false);
+      setAddModalVisible(false);
     }
+  };
+
+  const handleToggleRemove = (category: string) => {
+    const newSelected = new Set(selectedToRemove);
+    if (newSelected.has(category)) {
+      newSelected.delete(category);
+    } else {
+      newSelected.add(category);
+    }
+    setSelectedToRemove(newSelected);
+  };
+
+  const handleRemoveSelected = () => {
+    selectedToRemove.forEach(category => onDeleteCategory(category));
+    setSelectedToRemove(new Set());
+    setRemoveModalVisible(false);
+  };
+
+  const filteredCategories = useMemo(() => {
+    const query = searchQuery.toLowerCase().trim();
+    if (!query) return categories;
+    return categories.filter(category => 
+      category.toLowerCase().includes(query)
+    );
+  }, [categories, searchQuery]);
+
+  const handleCloseRemoveModal = () => {
+    setRemoveModalVisible(false);
+    setSelectedToRemove(new Set());
+    setSearchQuery('');
   };
 
   return (
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.title}>Categories</Text>
-        <TouchableOpacity
-          style={styles.addButton}
-          onPress={() => setModalVisible(true)}
-        >
-          <Plus size={20} color="white" />
-          <Text style={styles.addButtonText}>Add Category</Text>
-        </TouchableOpacity>
+        <View style={styles.buttonContainer}>
+          <TouchableOpacity
+            style={styles.removeButton}
+            onPress={() => setRemoveModalVisible(true)}
+          >
+            <Text style={styles.removeButtonText}>Remove Categories</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.addButton}
+            onPress={() => setAddModalVisible(true)}
+          >
+            <Plus size={20} color="white" />
+            <Text style={styles.addButtonText}>Add Category</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
-      <FlatList
-        data={categories}
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        keyExtractor={(item) => item}
-        renderItem={({ item }) => (
-          <View style={styles.categoryItem}>
-            <Text style={styles.categoryText}>{item}</Text>
-            <TouchableOpacity
-              style={styles.deleteButton}
-              onPress={() => onDeleteCategory(item)}
-            >
-              <Trash2 size={16} color="#FF3B30" />
-            </TouchableOpacity>
-          </View>
-        )}
-      />
-
+      {/* Add Category Modal */}
       <Modal
-        visible={modalVisible}
+        visible={addModalVisible}
         transparent
         animationType="slide"
-        onRequestClose={() => setModalVisible(false)}
+        onRequestClose={() => setAddModalVisible(false)}
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
@@ -75,7 +99,7 @@ export function CategoryManager({
               <Text style={styles.modalTitle}>Add New Category</Text>
               <TouchableOpacity
                 style={styles.closeButton}
-                onPress={() => setModalVisible(false)}
+                onPress={() => setAddModalVisible(false)}
               >
                 <X size={24} color="#666" />
               </TouchableOpacity>
@@ -100,6 +124,96 @@ export function CategoryManager({
           </View>
         </View>
       </Modal>
+
+      {/* Remove Categories Modal */}
+      <Modal
+        visible={removeModalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={handleCloseRemoveModal}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={handleCloseRemoveModal}
+        >
+          <TouchableOpacity
+            style={styles.modalContent}
+            activeOpacity={1}
+            onPress={e => e.stopPropagation()}
+          >
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Remove Categories</Text>
+              <TouchableOpacity
+                style={styles.closeButton}
+                onPress={handleCloseRemoveModal}
+              >
+                <X size={24} color="#666" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.searchContainer}>
+              <Search size={20} color="#666" />
+              <TextInput
+                style={styles.searchInput}
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                placeholder="Search categories..."
+                placeholderTextColor="#999"
+              />
+              {searchQuery.length > 0 && (
+                <TouchableOpacity
+                  style={styles.clearSearch}
+                  onPress={() => setSearchQuery('')}
+                >
+                  <X size={16} color="#666" />
+                </TouchableOpacity>
+              )}
+            </View>
+
+            <ScrollView style={styles.categoryList}>
+              {filteredCategories.map(category => (
+                <TouchableOpacity
+                  key={category}
+                  style={[
+                    styles.categoryItem,
+                    selectedToRemove.has(category) && styles.selectedToRemove
+                  ]}
+                  onPress={() => handleToggleRemove(category)}
+                >
+                  <Text style={[
+                    styles.categoryText,
+                    selectedToRemove.has(category) && styles.selectedToRemoveText
+                  ]}>
+                    {category}
+                  </Text>
+                  {selectedToRemove.has(category) && (
+                    <Check size={20} color="white" />
+                  )}
+                </TouchableOpacity>
+              ))}
+              {filteredCategories.length === 0 && (
+                <View style={styles.noResults}>
+                  <Text style={styles.noResultsText}>No categories found</Text>
+                </View>
+              )}
+            </ScrollView>
+
+            <TouchableOpacity
+              style={[
+                styles.removeSelectedButton,
+                selectedToRemove.size === 0 && styles.disabledButton
+              ]}
+              onPress={handleRemoveSelected}
+              disabled={selectedToRemove.size === 0}
+            >
+              <Text style={styles.removeSelectedButtonText}>
+                Remove Selected ({selectedToRemove.size})
+              </Text>
+            </TouchableOpacity>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
     </View>
   );
 }
@@ -113,10 +227,16 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 12,
+    paddingHorizontal: 20,
   },
   title: {
     fontSize: 18,
     fontWeight: '600',
+  },
+  buttonContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   addButton: {
     flexDirection: 'row',
@@ -126,26 +246,22 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 8,
   },
+  removeButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FF3B30',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
   addButtonText: {
     color: 'white',
     marginLeft: 4,
     fontWeight: '500',
   },
-  categoryItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#f0f0f0',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-    marginRight: 8,
-  },
-  categoryText: {
-    marginRight: 8,
-    color: '#333',
-  },
-  deleteButton: {
-    padding: 4,
+  removeButtonText: {
+    color: 'white',
+    fontWeight: '500',
   },
   modalOverlay: {
     flex: 1,
@@ -159,6 +275,7 @@ const styles = StyleSheet.create({
     padding: 20,
     width: '80%',
     maxWidth: 400,
+    maxHeight: '80%',
   },
   modalHeader: {
     flexDirection: 'row',
@@ -189,6 +306,35 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     alignItems: 'center',
   },
+  categoryList: {
+    maxHeight: 400,
+  },
+  categoryItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 8,
+    backgroundColor: '#f0f0f0',
+  },
+  selectedToRemove: {
+    backgroundColor: '#FF3B30',
+  },
+  categoryText: {
+    fontSize: 16,
+    color: '#333',
+  },
+  selectedToRemoveText: {
+    color: 'white',
+  },
+  removeSelectedButton: {
+    backgroundColor: '#FF3B30',
+    padding: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginTop: 16,
+  },
   disabledButton: {
     backgroundColor: '#ccc',
   },
@@ -196,5 +342,36 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 16,
     fontWeight: '600',
+  },
+  removeSelectedButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f0f0f0',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    marginBottom: 16,
+  },
+  searchInput: {
+    flex: 1,
+    paddingVertical: 8,
+    paddingHorizontal: 8,
+    fontSize: 16,
+    color: '#333',
+  },
+  clearSearch: {
+    padding: 4,
+  },
+  noResults: {
+    padding: 20,
+    alignItems: 'center',
+  },
+  noResultsText: {
+    color: '#666',
+    fontSize: 16,
   },
 }); 

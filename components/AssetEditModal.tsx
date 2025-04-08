@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   Modal,
   View,
@@ -7,15 +7,16 @@ import {
   TouchableOpacity,
   TextInput,
   Platform,
+  ScrollView,
 } from 'react-native';
-import { X, Trash2 } from 'lucide-react-native';
+import { X, Trash2, Search, Check } from 'lucide-react-native';
 
 interface Asset {
   id: string;
   name: string;
   type: string;
   description?: string;
-  status: string;
+  status: 'Available' | 'Unavailable';
 }
 
 interface AssetEditModalProps {
@@ -24,6 +25,8 @@ interface AssetEditModalProps {
   onSave: (asset: Asset) => void;
   onDelete: (assetId: string) => void;
   asset: Asset | null;
+  categories: string[];
+  isNewAsset?: boolean;
 }
 
 export function AssetEditModal({
@@ -32,11 +35,29 @@ export function AssetEditModal({
   onSave,
   onDelete,
   asset,
+  categories,
+  isNewAsset = false,
 }: AssetEditModalProps) {
-  const [editedAsset, setEditedAsset] = useState<Asset | null>(asset);
+  const [editedAsset, setEditedAsset] = useState<Asset | null>(
+    asset || {
+      id: Date.now().toString(),
+      name: '',
+      type: '',
+      status: 'Available',
+    }
+  );
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showCategorySearch, setShowCategorySearch] = useState(false);
 
   React.useEffect(() => {
-    setEditedAsset(asset);
+    setEditedAsset(
+      asset || {
+        id: Date.now().toString(),
+        name: '',
+        type: '',
+        status: 'Available',
+      }
+    );
   }, [asset]);
 
   const handleSave = () => {
@@ -53,6 +74,20 @@ export function AssetEditModal({
     }
   };
 
+  const filteredCategories = useMemo(() => {
+    const query = searchQuery.toLowerCase().trim();
+    if (!query) return categories;
+    return categories.filter(category => 
+      category.toLowerCase().includes(query)
+    );
+  }, [categories, searchQuery]);
+
+  const handleClose = () => {
+    setShowCategorySearch(false);
+    setSearchQuery('');
+    onClose();
+  };
+
   if (!editedAsset) return null;
 
   return (
@@ -60,18 +95,28 @@ export function AssetEditModal({
       visible={visible}
       animationType="slide"
       transparent={true}
-      onRequestClose={onClose}
+      onRequestClose={handleClose}
     >
-      <View style={styles.modalOverlay}>
-        <View style={styles.modalContent}>
+      <TouchableOpacity
+        style={styles.modalOverlay}
+        activeOpacity={1}
+        onPress={handleClose}
+      >
+        <TouchableOpacity
+          style={styles.modalContent}
+          activeOpacity={1}
+          onPress={e => e.stopPropagation()}
+        >
           <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Edit Asset</Text>
-            <TouchableOpacity onPress={onClose} style={styles.closeButton}>
+            <Text style={styles.modalTitle}>
+              {isNewAsset ? 'New Asset' : 'Edit Asset'}
+            </Text>
+            <TouchableOpacity onPress={handleClose} style={styles.closeButton}>
               <X size={24} color="#666" />
             </TouchableOpacity>
           </View>
 
-          <View style={styles.form}>
+          <ScrollView style={styles.form}>
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Name</Text>
               <TextInput
@@ -84,12 +129,17 @@ export function AssetEditModal({
 
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Type</Text>
-              <TextInput
-                style={styles.input}
-                value={editedAsset.type}
-                onChangeText={(text) => setEditedAsset({ ...editedAsset, type: text })}
-                placeholder="Asset type"
-              />
+              <TouchableOpacity
+                style={styles.categoryButton}
+                onPress={() => setShowCategorySearch(true)}
+              >
+                <Text style={[
+                  styles.categoryButtonText,
+                  !editedAsset.type && styles.placeholderText
+                ]}>
+                  {editedAsset.type || 'Select category'}
+                </Text>
+              </TouchableOpacity>
             </View>
 
             <View style={styles.inputGroup}>
@@ -106,33 +156,131 @@ export function AssetEditModal({
 
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Status</Text>
-              <TextInput
-                style={styles.input}
-                value={editedAsset.status}
-                onChangeText={(text) => setEditedAsset({ ...editedAsset, status: text })}
-                placeholder="Asset status"
-              />
+              <View style={styles.statusContainer}>
+                <TouchableOpacity
+                  style={[
+                    styles.statusButton,
+                    editedAsset.status === 'Available' && styles.statusButtonActive
+                  ]}
+                  onPress={() => setEditedAsset({ ...editedAsset, status: 'Available' })}
+                >
+                  <Text style={[
+                    styles.statusButtonText,
+                    editedAsset.status === 'Available' && styles.statusButtonTextActive
+                  ]}>Available</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.statusButton,
+                    editedAsset.status === 'Unavailable' && styles.statusButtonActive
+                  ]}
+                  onPress={() => setEditedAsset({ ...editedAsset, status: 'Unavailable' })}
+                >
+                  <Text style={[
+                    styles.statusButtonText,
+                    editedAsset.status === 'Unavailable' && styles.statusButtonTextActive
+                  ]}>Unavailable</Text>
+                </TouchableOpacity>
+              </View>
             </View>
-          </View>
+          </ScrollView>
 
           <View style={styles.buttonContainer}>
-            <TouchableOpacity
-              style={[styles.button, styles.deleteButton]}
-              onPress={handleDelete}
-            >
-              <Trash2 size={20} color="white" />
-              <Text style={styles.buttonText}>Delete</Text>
-            </TouchableOpacity>
+            {!isNewAsset && (
+              <TouchableOpacity
+                style={[styles.button, styles.deleteButton]}
+                onPress={handleDelete}
+              >
+                <Trash2 size={20} color="white" />
+                <Text style={styles.buttonText}>Delete</Text>
+              </TouchableOpacity>
+            )}
 
             <TouchableOpacity
               style={[styles.button, styles.saveButton]}
               onPress={handleSave}
+              disabled={!editedAsset.name.trim() || !editedAsset.type}
             >
-              <Text style={styles.buttonText}>Save Changes</Text>
+              <Text style={styles.buttonText}>
+                {isNewAsset ? 'Create Asset' : 'Save Changes'}
+              </Text>
             </TouchableOpacity>
           </View>
-        </View>
-      </View>
+
+          {/* Category Search Modal */}
+          <Modal
+            visible={showCategorySearch}
+            transparent
+            animationType="slide"
+            onRequestClose={() => setShowCategorySearch(false)}
+          >
+            <View style={styles.modalOverlay}>
+              <View style={styles.modalContent}>
+                <View style={styles.modalHeader}>
+                  <Text style={styles.modalTitle}>Select Category</Text>
+                  <TouchableOpacity
+                    style={styles.closeButton}
+                    onPress={() => setShowCategorySearch(false)}
+                  >
+                    <X size={24} color="#666" />
+                  </TouchableOpacity>
+                </View>
+
+                <View style={styles.searchContainer}>
+                  <Search size={20} color="#666" />
+                  <TextInput
+                    style={styles.searchInput}
+                    value={searchQuery}
+                    onChangeText={setSearchQuery}
+                    placeholder="Search categories..."
+                    placeholderTextColor="#999"
+                  />
+                  {searchQuery.length > 0 && (
+                    <TouchableOpacity
+                      style={styles.clearSearch}
+                      onPress={() => setSearchQuery('')}
+                    >
+                      <X size={16} color="#666" />
+                    </TouchableOpacity>
+                  )}
+                </View>
+
+                <ScrollView style={styles.categoryList}>
+                  {filteredCategories.map(category => (
+                    <TouchableOpacity
+                      key={category}
+                      style={[
+                        styles.categoryItem,
+                        editedAsset.type === category && styles.selectedCategory
+                      ]}
+                      onPress={() => {
+                        setEditedAsset({ ...editedAsset, type: category });
+                        setShowCategorySearch(false);
+                        setSearchQuery('');
+                      }}
+                    >
+                      <Text style={[
+                        styles.categoryText,
+                        editedAsset.type === category && styles.selectedCategoryText
+                      ]}>
+                        {category}
+                      </Text>
+                      {editedAsset.type === category && (
+                        <Check size={20} color="white" />
+                      )}
+                    </TouchableOpacity>
+                  ))}
+                  {filteredCategories.length === 0 && (
+                    <View style={styles.noResults}>
+                      <Text style={styles.noResultsText}>No categories found</Text>
+                    </View>
+                  )}
+                </ScrollView>
+              </View>
+            </View>
+          </Modal>
+        </TouchableOpacity>
+      </TouchableOpacity>
     </Modal>
   );
 }
@@ -223,5 +371,92 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     marginLeft: 8,
+  },
+  categoryButton: {
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 8,
+    padding: 12,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  categoryButtonText: {
+    fontSize: 16,
+    color: '#333',
+  },
+  placeholderText: {
+    color: '#999',
+  },
+  statusContainer: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  statusButton: {
+    flex: 1,
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#ddd',
+    alignItems: 'center',
+  },
+  statusButtonActive: {
+    backgroundColor: '#007AFF',
+    borderColor: '#007AFF',
+  },
+  statusButtonText: {
+    fontSize: 16,
+    color: '#666',
+  },
+  statusButtonTextActive: {
+    color: 'white',
+  },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f0f0f0',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    marginBottom: 16,
+  },
+  searchInput: {
+    flex: 1,
+    paddingVertical: 8,
+    paddingHorizontal: 8,
+    fontSize: 16,
+    color: '#333',
+  },
+  clearSearch: {
+    padding: 4,
+  },
+  categoryList: {
+    maxHeight: 400,
+  },
+  categoryItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 8,
+    backgroundColor: '#f0f0f0',
+  },
+  selectedCategory: {
+    backgroundColor: '#007AFF',
+  },
+  categoryText: {
+    fontSize: 16,
+    color: '#333',
+  },
+  selectedCategoryText: {
+    color: 'white',
+  },
+  noResults: {
+    padding: 20,
+    alignItems: 'center',
+  },
+  noResultsText: {
+    color: '#666',
+    fontSize: 16,
   },
 }); 

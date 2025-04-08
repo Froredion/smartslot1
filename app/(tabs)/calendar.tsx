@@ -7,14 +7,32 @@ import { BookingModal } from '@/components/BookingModal';
 
 // Temporary mock data
 const MOCK_ASSETS = [
-  { id: '1', name: 'Car A-123', type: 'Vehicle', pricePerDay: 50 },
-  { id: '2', name: 'Room 201', type: 'Room', pricePerDay: 100 },
-  { id: '3', name: 'Villa Paradise', type: 'Property', pricePerDay: 200 },
+  { id: '1', name: 'Car A-123', type: 'Vehicle', pricePerDay: 50, currency: 'USD' },
+  { id: '2', name: 'Room 201', type: 'Room', pricePerDay: 100, currency: 'USD' },
+  { id: '3', name: 'Villa Paradise', type: 'Property', pricePerDay: 200, currency: 'USD' },
 ];
 
 const MOCK_BOOKINGS = [
-  { id: '1', assetId: '1', date: new Date(2024, 0, 20) },  // January 20, 2024
-  { id: '2', assetId: '2', date: new Date(2024, 0, 22) },  // January 22, 2024
+  { 
+    id: '1', 
+    assetId: '1', 
+    date: new Date(2024, 0, 20),
+    description: 'Business trip',
+    bookedBy: 'John Doe',
+    numberOfPeople: 2,
+    customPrice: 60,
+    currency: 'USD'
+  },
+  { 
+    id: '2', 
+    assetId: '2', 
+    date: new Date(2024, 0, 22),
+    description: 'Team meeting',
+    bookedBy: 'Jane Smith',
+    numberOfPeople: 5,
+    customPrice: 120,
+    currency: 'USD'
+  },
 ];
 
 const getAvailabilityColor = (percentage: number) => {
@@ -54,16 +72,20 @@ export default function Calendar() {
   const markedDates = useMemo(() => {
     const dates = [];
     const today = new Date();
-    for (let i = 0; i < 90; i++) {
-      const date = addDays(today, i);
-      const availability = getDateAvailability(date);
+    const startDate = new Date(today.getFullYear() - 1, today.getMonth(), today.getDate()); // Allow viewing 1 year back
+    const endDate = new Date(today.getFullYear() + 1, today.getMonth(), today.getDate()); // Allow viewing 1 year ahead
+    
+    let currentDate = new Date(startDate);
+    while (currentDate <= endDate) {
+      const availability = getDateAvailability(currentDate);
       dates.push({
-        date,
+        date: new Date(currentDate),
         dots: [{
           color: getAvailabilityColor(availability.percentage),
           selectedDotColor: '#007AFF'
         }],
       });
+      currentDate = addDays(currentDate, 1);
     }
     return dates;
   }, []);
@@ -77,9 +99,14 @@ export default function Calendar() {
     }
   };
 
-  const handleBookingConfirm = (assetId: string) => {
+  const handleBookingConfirm = (bookingDetails: Omit<Booking, 'id'>) => {
     if (selectedDate) {
-      console.log('Booking confirmed:', { assetId, date: selectedDate });
+      const newBooking: Booking = {
+        id: Date.now().toString(), // Simple ID generation
+        ...bookingDetails,
+      };
+      MOCK_BOOKINGS.push(newBooking);
+      console.log('Booking confirmed:', newBooking);
     }
     setModalVisible(false);
   };
@@ -149,8 +176,8 @@ export default function Calendar() {
         calendarColor={'#ffffff'}
         calendarHeaderFormat={'MMMM yyyy'}
         onDateSelected={handleDateSelect}
-        minDate={new Date()}
-        maxDate={addDays(new Date(), 90)}
+        minDate={addDays(new Date(), -365)} // Allow viewing 1 year back
+        maxDate={addDays(new Date(), 365)} // Allow viewing 1 year ahead
         scrollable
         upperCaseDays={false}
         markedDates={markedDates}
