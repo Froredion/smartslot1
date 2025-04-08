@@ -232,13 +232,16 @@ const styles = StyleSheet.create({
   assetListContainer: {
     flex: 1,
     marginBottom: 20,
+    width: '100%',
   },
   assetList: {
     flex: 1,
+    width: '100%',
   },
   assetListContent: {
     padding: 16,
     gap: 16,
+    flexGrow: 1,
   },
   assetItemContainer: {
     backgroundColor: 'white',
@@ -248,6 +251,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
+    width: '100%',
   },
   assetItem: {
     flexDirection: 'row',
