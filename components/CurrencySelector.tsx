@@ -77,11 +77,18 @@ export function CurrencySelector({
   visible,
   onClose,
   onSelect,
-  currentCurrency,
+  currentCurrency = '', // Provide default empty string
 }: CurrencySelectorProps) {
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = useState<string>(''); // Initialize as empty string
   const [userCountry, setUserCountry] = useState<string | null>(null);
   const [sortedCurrencies, setSortedCurrencies] = useState<Currency[]>([]);
+
+  // Reset search query when modal is opened
+  useEffect(() => {
+    if (visible) {
+      setSearchQuery('');
+    }
+  }, [visible]);
 
   useEffect(() => {
     const detectUserCountry = async () => {
@@ -225,7 +232,7 @@ export function CurrencySelector({
             <TextInput
               style={styles.searchInput}
               value={searchQuery}
-              onChangeText={setSearchQuery}
+              onChangeText={(text: string) => setSearchQuery(text)}
               placeholder="Search currency or country..."
               placeholderTextColor="#999"
             />
@@ -331,4 +338,4 @@ const styles = StyleSheet.create({
     color: '#666',
     marginTop: 2,
   },
-}); 
+});

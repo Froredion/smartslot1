@@ -5,235 +5,152 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  Platform,
-  Image,
-  FlatList,
-  Dimensions,
   TextInput,
+  Platform,
   ScrollView,
+  ActivityIndicator,
 } from 'react-native';
-import { X, User, Users, DollarSign, Info, ChevronDown } from 'lucide-react-native';
-import { format, isSameDay } from 'date-fns';
-import * as Localization from 'expo-localization';
-import { CurrencySelector } from './CurrencySelector';
-import { getCurrencyFromCountry, getCountryFromLocation } from '../utils/currencyUtils';
-
-interface Asset {
-  id: string;
-  name: string;
-  type: string;
-  pricePerDay: number;
-  currency: string;
-}
-
-interface Booking {
-  id: string;
-  assetId: string;
-  date: Date;
-  description?: string;
-  bookedBy?: string;
-  numberOfPeople?: number;
-  customPrice?: number;
-  currency?: string;
-}
+import { X, Trash2, Users, DollarSign, Info, AlertCircle, User, Clock } from 'lucide-react-native';
+import { format } from 'date-fns';
+import { auth } from '@/lib/firebase/config';
+import { TimeSlotSelector } from './TimeSlotSelector';
+import type { Asset, Booking, TimeSlot } from '@/lib/firebase/firestore';
 
 interface BookingModalProps {
   visible: boolean;
   onClose: () => void;
-  onConfirm: (bookingDetails: Omit<Booking, 'id'>) => void;
+  onConfirm: (bookingDetails: Omit<Booking, 'id' | 'bookedBy'>) => void;
+  onDelete: (bookingId: string) => void;
   selectedDate: Date;
   assets: Asset[];
+  initialAssetId?: string | null;
+  editBooking?: Booking | null;
   bookings: Booking[];
 }
-
-const assetImages = {
-  Vehicle: 'https://images.unsplash.com/photo-1494976388531-d1058494cdd8?w=500',
-  Room: 'https://images.unsplash.com/photo-1522771739844-6a9f6d5f14af?w=500',
-  Property: 'https://images.unsplash.com/photo-1564013799919-ab600027ffc6?w=500',
-};
 
 export function BookingModal({
   visible,
   onClose,
   onConfirm,
+  onDelete,
   selectedDate,
   assets,
+  initialAssetId,
+  editBooking,
   bookings,
 }: BookingModalProps) {
-  const [selectedAsset, setSelectedAsset] = useState<string | null>(null);
-  const [currencySelectorVisible, setCurrencySelectorVisible] = useState(false);
-  const [userCountry, setUserCountry] = useState<string | null>(null);
   const [bookingDetails, setBookingDetails] = useState({
+    assetId: '',
     description: '',
-    bookedBy: '',
+    clientName: '',
     numberOfPeople: '',
     customPrice: '',
-    currency: 'USD', // Default to USD
+    currency: 'USD',
+    timeSlot: null as TimeSlot | null,
   });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const detectUserCountry = async () => {
-      try {
-        // First try to get country from location
-        const countryFromLocation = await getCountryFromLocation();
-        console.log('BookingModal - Country from location:', countryFromLocation);
-
-        if (countryFromLocation) {
-          setUserCountry(countryFromLocation);
-          const countryCurrency = getCurrencyFromCountry(countryFromLocation);
-          console.log('BookingModal - Setting currency based on location:', {
-            countryCode: countryFromLocation,
-            countryCurrency
-          });
-          setBookingDetails(prev => ({ ...prev, currency: countryCurrency }));
-          return;
-        }
-
-        // If location detection fails, fall back to locale detection
-        const locales = await Localization.getLocales();
-        console.log('BookingModal - Falling back to locale detection:', JSON.stringify(locales, null, 2));
-        
-        if (locales && locales.length > 0) {
-          // First try to find a US locale
-          const usLocale = locales.find(locale => locale.regionCode === 'US');
-          const primaryLocale = usLocale || locales[0];
-          
-          console.log('BookingModal - Primary locale details:', {
-            languageCode: primaryLocale.languageCode,
-            regionCode: primaryLocale.regionCode,
-            measurementSystem: primaryLocale.measurementSystem,
-            textDirection: primaryLocale.textDirection,
-            decimalSeparator: primaryLocale.decimalSeparator,
-            digitGroupingSeparator: primaryLocale.digitGroupingSeparator,
-          });
-          
-          // Try to get country code from regionCode first
-          let countryCode = primaryLocale.regionCode;
-          console.log('BookingModal - Initial country code from regionCode:', countryCode);
-          
-          // If regionCode is not available, try to extract from languageCode
-          if (!countryCode && primaryLocale.languageCode) {
-            const parts = primaryLocale.languageCode.split('-');
-            console.log('BookingModal - Language code parts:', parts);
-            if (parts.length > 1) {
-              countryCode = parts[1].toUpperCase();
-              console.log('BookingModal - Country code extracted from language code:', countryCode);
-            }
-          }
-          
-          console.log('BookingModal - Final country code:', countryCode);
-          
-          if (countryCode) {
-            setUserCountry(countryCode);
-            const countryCurrency = getCurrencyFromCountry(countryCode);
-            console.log('BookingModal - Setting currency based on locale:', {
-              countryCode,
-              countryCurrency
-            });
-            setBookingDetails(prev => ({ ...prev, currency: countryCurrency }));
-          } else {
-            console.log('BookingModal - No country code detected, using USD as default');
-            setBookingDetails(prev => ({ ...prev, currency: 'USD' }));
-          }
-        } else {
-          console.log('BookingModal - No locales detected, using USD as default');
-          setBookingDetails(prev => ({ ...prev, currency: 'USD' }));
-        }
-      } catch (error) {
-        console.error('BookingModal - Error detecting country:', error);
-        // If country detection fails, use USD
-        setBookingDetails(prev => ({ ...prev, currency: 'USD' }));
-      }
-    };
-    detectUserCountry();
-  }, []);
-
-  const handleConfirm = () => {
-    if (selectedAsset) {
-      onConfirm({
-        assetId: selectedAsset,
-        date: selectedDate,
-        description: bookingDetails.description,
-        bookedBy: bookingDetails.bookedBy,
-        numberOfPeople: bookingDetails.numberOfPeople ? parseInt(bookingDetails.numberOfPeople) : undefined,
-        customPrice: bookingDetails.customPrice ? parseFloat(bookingDetails.customPrice) : undefined,
-        currency: bookingDetails.currency,
-      });
-      setSelectedAsset(null);
+    if (editBooking) {
       setBookingDetails({
-        description: '',
-        bookedBy: '',
-        numberOfPeople: '',
-        customPrice: '',
-        currency: 'USD', // Reset to default
+        assetId: editBooking.assetId,
+        description: editBooking.description || '',
+        clientName: editBooking.clientName || '',
+        numberOfPeople: editBooking.numberOfPeople?.toString() || '',
+        customPrice: editBooking.customPrice?.toString() || '',
+        currency: editBooking.currency,
+        timeSlot: editBooking.timeSlot || null,
       });
+    } else if (initialAssetId) {
+      setBookingDetails(prev => ({ ...prev, assetId: initialAssetId }));
+    }
+  }, [editBooking, initialAssetId]);
+
+  const handleConfirm = async () => {
+    try {
+      setError(null);
+      setLoading(true);
+
+      const selectedAsset = assets.find(a => a.id === bookingDetails.assetId);
+      if (!selectedAsset) {
+        setError('Please select an asset');
+        return;
+      }
+
+      // Validate time slot if asset uses time slots
+      if (selectedAsset.bookingType === 'time-slots' && !bookingDetails.timeSlot) {
+        setError('Please select a time slot');
+        return;
+      }
+
+      // Validate and parse number fields
+      let numberOfPeople: number | undefined;
+      let customPrice: number | undefined;
+
+      if (bookingDetails.numberOfPeople.trim()) {
+        const parsedPeople = parseInt(bookingDetails.numberOfPeople, 10);
+        if (!isNaN(parsedPeople) && parsedPeople > 0) {
+          numberOfPeople = parsedPeople;
+        }
+      }
+
+      if (bookingDetails.customPrice.trim()) {
+        const parsedPrice = parseFloat(bookingDetails.customPrice);
+        if (!isNaN(parsedPrice) && parsedPrice >= 0) {
+          customPrice = parsedPrice;
+        }
+      }
+
+      const bookingData = {
+        assetId: selectedAsset.id,
+        date: selectedDate,
+        description: bookingDetails.description.trim() || undefined,
+        clientName: bookingDetails.clientName.trim() || undefined,
+        numberOfPeople,
+        customPrice,
+        currency: selectedAsset.currency,
+        timeSlot: bookingDetails.timeSlot || undefined,
+      };
+
+      await onConfirm(bookingData);
+      onClose();
+    } catch (err: any) {
+      console.error('Error in handleConfirm:', err);
+      setError(err.message || 'Failed to save booking');
+    } finally {
+      setLoading(false);
     }
   };
 
-  const isAssetBooked = (assetId: string) => {
-    return bookings.some(booking => 
-      booking.assetId === assetId && isSameDay(booking.date, selectedDate)
-    );
+  const handleDelete = async () => {
+    if (!editBooking) return;
+    
+    try {
+      setError(null);
+      setLoading(true);
+      await onDelete(editBooking.id);
+      onClose();
+    } catch (err: any) {
+      setError(err.message || 'Failed to delete booking');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const renderAssetItem = ({ item: asset }: { item: Asset }) => {
-    const isBooked = isAssetBooked(asset.id);
-    const isSelected = selectedAsset === asset.id;
-    
-    return (
-      <TouchableOpacity
-        style={[
-          styles.assetCard,
-          isSelected && styles.selectedAsset,
-          isBooked && styles.bookedAsset,
-        ]}
-        onPress={() => !isBooked && setSelectedAsset(asset.id)}
-        disabled={isBooked}
-      >
-        <View style={styles.assetHeader}>
-          <Text style={[
-            styles.assetName,
-            isBooked && styles.bookedText
-          ]}>
-            {asset.name}
-          </Text>
-          <View style={[
-            styles.statusBadge,
-            { backgroundColor: isBooked ? '#FFE5E5' : '#E5FFE5' }
-          ]}>
-            <View style={[
-              styles.statusDot,
-              { backgroundColor: isBooked ? '#FF3B30' : '#34C759' }
-            ]} />
-            <Text style={[
-              styles.assetStatus,
-              { color: isBooked ? '#FF3B30' : '#34C759' }
-            ]}>
-              {isBooked ? 'Booked' : 'Available'}
-            </Text>
-          </View>
-        </View>
-        <Text style={[
-          styles.assetType,
-          isBooked && styles.bookedText
-        ]}>
-          {asset.type}
-        </Text>
-        <Text style={[
-          styles.assetPrice,
-          isBooked && styles.bookedText
-        ]}>
-          {asset.currency} {asset.pricePerDay} per day
-        </Text>
-        {!isBooked && (
-          <View style={[
-            styles.checkmark,
-            isSelected && styles.selectedCheckmark
-          ]} />
-        )}
-      </TouchableOpacity>
-    );
-  };
+  const selectedAsset = assets.find(a => a.id === bookingDetails.assetId);
+  
+  // Get booked time slots for the selected date and asset
+  const bookedTimeSlots = selectedAsset?.bookingType === 'time-slots' 
+    ? bookings
+        .filter(b => 
+          b.assetId === selectedAsset.id && 
+          format(b.date, 'yyyy-MM-dd') === format(selectedDate, 'yyyy-MM-dd') &&
+          b.timeSlot &&
+          (!editBooking || b.id !== editBooking.id) // Exclude current booking if editing
+        )
+        .map(b => b.timeSlot!)
+    : [];
 
   return (
     <Modal
@@ -245,7 +162,9 @@ export function BookingModal({
       <View style={styles.modalOverlay}>
         <View style={styles.modalContent}>
           <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Book for</Text>
+            <Text style={styles.modalTitle}>
+              {editBooking ? 'Edit Booking' : 'New Booking'}
+            </Text>
             <TouchableOpacity onPress={onClose} style={styles.closeButton}>
               <X size={24} color="#666" />
             </TouchableOpacity>
@@ -255,48 +174,76 @@ export function BookingModal({
             {format(selectedDate, "EEEE, MMMM d, yyyy")}
           </Text>
 
-          <FlatList
-            data={assets}
-            renderItem={renderAssetItem}
-            keyExtractor={item => item.id}
-            contentContainerStyle={styles.assetListContent}
-            showsVerticalScrollIndicator={false}
-          />
+          {error && (
+            <View style={styles.errorContainer}>
+              <AlertCircle size={20} color="#FF3B30" />
+              <Text style={styles.errorText}>{error}</Text>
+            </View>
+          )}
 
           {selectedAsset && (
-            <ScrollView style={styles.bookingDetailsContainer}>
-              <Text style={styles.sectionTitle}>Booking Details</Text>
-              
+            <ScrollView style={styles.form}>
+              <View style={styles.assetInfo}>
+                <Text style={styles.assetName}>{selectedAsset.name}</Text>
+                <Text style={styles.assetType}>{selectedAsset.type}</Text>
+                <Text style={styles.assetPrice}>
+                  {selectedAsset.currency} {selectedAsset.pricePerDay} per day
+                </Text>
+                {editBooking && (
+                  <Text style={styles.bookedBy}>
+                    Booked by: {editBooking.bookedBy}
+                  </Text>
+                )}
+              </View>
+
+              {selectedAsset.bookingType === 'time-slots' && selectedAsset.timeSlots && (
+                <View style={styles.timeSlotsSection}>
+                  <View style={styles.sectionHeader}>
+                    <Clock size={20} color="#666" />
+                    <Text style={styles.sectionTitle}>Select Time Slot</Text>
+                  </View>
+                  <TimeSlotSelector
+                    timeSlots={selectedAsset.timeSlots}
+                    selectedTimeSlot={bookingDetails.timeSlot}
+                    onSelectTimeSlot={(timeSlot) => 
+                      setBookingDetails(prev => ({ ...prev, timeSlot }))
+                    }
+                    bookedTimeSlots={bookedTimeSlots}
+                  />
+                </View>
+              )}
+
+              <View style={styles.inputGroup}>
+                <View style={styles.inputLabel}>
+                  <User size={16} color="#666" />
+                  <Text style={styles.labelText}>Client Name (Optional)</Text>
+                </View>
+                <TextInput
+                  style={styles.input}
+                  value={bookingDetails.clientName}
+                  onChangeText={(text) => setBookingDetails(prev => ({ ...prev, clientName: text }))}
+                  placeholder="Enter client name"
+                />
+              </View>
+
               <View style={styles.inputGroup}>
                 <View style={styles.inputLabel}>
                   <Info size={16} color="#666" />
-                  <Text style={styles.labelText}>Description</Text>
+                  <Text style={styles.labelText}>Description (Optional)</Text>
                 </View>
                 <TextInput
                   style={styles.input}
                   value={bookingDetails.description}
                   onChangeText={(text) => setBookingDetails(prev => ({ ...prev, description: text }))}
                   placeholder="Enter booking description"
-                />
-              </View>
-
-              <View style={styles.inputGroup}>
-                <View style={styles.inputLabel}>
-                  <User size={16} color="#666" />
-                  <Text style={styles.labelText}>Booked By</Text>
-                </View>
-                <TextInput
-                  style={styles.input}
-                  value={bookingDetails.bookedBy}
-                  onChangeText={(text) => setBookingDetails(prev => ({ ...prev, bookedBy: text }))}
-                  placeholder="Enter name"
+                  multiline
                 />
               </View>
 
               <View style={styles.inputGroup}>
                 <View style={styles.inputLabel}>
                   <Users size={16} color="#666" />
-                  <Text style={styles.labelText}>Number of People</Text>
+                  <Text style={styles.labelText}>Number of People (Optional)</Text>
                 </View>
                 <TextInput
                   style={styles.input}
@@ -310,64 +257,66 @@ export function BookingModal({
               <View style={styles.inputGroup}>
                 <View style={styles.inputLabel}>
                   <DollarSign size={16} color="#666" />
-                  <Text style={styles.labelText}>Custom Price</Text>
+                  <Text style={styles.labelText}>Custom Price (Optional)</Text>
                 </View>
-                <View style={styles.priceInputContainer}>
-                  <TextInput
-                    style={[styles.input, styles.priceInput]}
-                    value={bookingDetails.customPrice}
-                    onChangeText={(text) => setBookingDetails(prev => ({ ...prev, customPrice: text }))}
-                    placeholder="Enter custom price"
-                    keyboardType="numeric"
-                  />
-                  <TouchableOpacity
-                    style={styles.currencyButton}
-                    onPress={() => setCurrencySelectorVisible(true)}
-                  >
-                    <Text style={styles.currencyButtonText}>{bookingDetails.currency}</Text>
-                    <ChevronDown size={16} color="#666" />
-                  </TouchableOpacity>
-                </View>
+                <TextInput
+                  style={styles.input}
+                  value={bookingDetails.customPrice}
+                  onChangeText={(text) => setBookingDetails(prev => ({ ...prev, customPrice: text }))}
+                  placeholder={`Default: ${selectedAsset.currency} ${selectedAsset.pricePerDay}`}
+                  keyboardType="numeric"
+                />
               </View>
             </ScrollView>
           )}
 
-          <TouchableOpacity
-            style={[styles.confirmButton, !selectedAsset && styles.disabledButton]}
-            onPress={handleConfirm}
-            disabled={!selectedAsset}
-          >
-            <Text style={styles.confirmButtonText}>
-              {selectedAsset ? 'Confirm Booking' : 'Select an Available Asset'}
-            </Text>
-          </TouchableOpacity>
+          <View style={styles.buttonContainer}>
+            {editBooking && (
+              <TouchableOpacity
+                style={[styles.button, styles.deleteButton]}
+                onPress={handleDelete}
+                disabled={loading}
+              >
+                {loading ? (
+                  <ActivityIndicator color="white" />
+                ) : (
+                  <>
+                    <Trash2 size={20} color="white" />
+                    <Text style={styles.buttonText}>Delete Booking</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            )}
 
-          <CurrencySelector
-            visible={currencySelectorVisible}
-            onClose={() => setCurrencySelectorVisible(false)}
-            onSelect={(currency) => setBookingDetails(prev => ({ ...prev, currency }))}
-            currentCurrency={bookingDetails.currency}
-          />
+            <TouchableOpacity
+              style={[
+                styles.button, 
+                styles.confirmButton,
+                (!selectedAsset || loading) && styles.disabledButton
+              ]}
+              onPress={handleConfirm}
+              disabled={!selectedAsset || loading}
+            >
+              {loading ? (
+                <ActivityIndicator color="white" />
+              ) : (
+                <Text style={styles.buttonText}>
+                  {editBooking ? 'Update Booking' : 'Confirm Booking'}
+                </Text>
+              )}
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
     </Modal>
   );
 }
 
-const { width } = Dimensions.get('window');
-const cardWidth = (width - 48) / 2; // 48 = padding (16) * 2 + gap (16)
-
 const styles = StyleSheet.create({
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'flex-end',
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    zIndex: 1000,
   },
   modalContent: {
     backgroundColor: 'white',
@@ -376,8 +325,6 @@ const styles = StyleSheet.create({
     paddingTop: 20,
     height: '80%',
     paddingBottom: Platform.OS === 'ios' ? 40 : 20,
-    position: 'relative',
-    zIndex: 1001,
   },
   modalHeader: {
     flexDirection: 'row',
@@ -400,138 +347,68 @@ const styles = StyleSheet.create({
     marginBottom: 20,
     fontWeight: '600',
   },
-  assetListContent: {
+  errorContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFE5E5',
+    padding: 12,
+    marginHorizontal: 20,
+    marginBottom: 12,
+    borderRadius: 8,
+    gap: 8,
+  },
+  errorText: {
+    flex: 1,
+    color: '#FF3B30',
+    fontSize: 14,
+  },
+  form: {
+    flex: 1,
     padding: 20,
   },
-  assetCard: {
-    backgroundColor: 'white',
-    borderRadius: 12,
+  assetInfo: {
+    backgroundColor: '#f8f9fa',
     padding: 15,
-    marginBottom: 15,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-    position: 'relative',
-  },
-  selectedAsset: {
-    backgroundColor: '#F0F8FF',
-    borderColor: '#007AFF',
-    borderWidth: 2,
-  },
-  bookedAsset: {
-    backgroundColor: '#f8f8f8',
-  },
-  assetHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
+    borderRadius: 12,
+    marginBottom: 20,
   },
   assetName: {
     fontSize: 18,
     fontWeight: '600',
-    flex: 1,
-    marginRight: 8,
+    marginBottom: 4,
   },
   assetType: {
     fontSize: 14,
     color: '#666',
     marginBottom: 4,
   },
-  statusBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  statusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    marginRight: 6,
-  },
-  assetStatus: {
-    fontSize: 14,
-    fontWeight: '500',
-  },
   assetPrice: {
-    fontSize: 14,
+    fontSize: 16,
     color: '#007AFF',
     fontWeight: '600',
   },
-  bookedText: {
-    opacity: 0.6,
-  },
-  checkmark: {
-    position: 'absolute',
-    top: 15,
-    right: 15,
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    borderWidth: 2,
-    borderColor: '#ddd',
-  },
-  selectedCheckmark: {
-    backgroundColor: '#007AFF',
-    borderColor: '#007AFF',
-  },
-  summaryContainer: {
-    padding: 20,
-    backgroundColor: '#f8f8ff',
-    marginHorizontal: 20,
-    borderRadius: 12,
-  },
-  summaryTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 12,
-  },
-  summaryRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-  },
-  summaryLabel: {
+  bookedBy: {
+    fontSize: 14,
     color: '#666',
+    marginTop: 8,
+    fontStyle: 'italic',
   },
-  summaryValue: {
-    fontWeight: '600',
+  timeSlotsSection: {
+    marginBottom: 20,
   },
-  confirmButton: {
-    backgroundColor: '#007AFF',
-    marginHorizontal: 20,
-    marginTop: 12,
-    marginBottom: Platform.OS === 'ios' ? 20 : 12,
-    padding: 16,
-    borderRadius: 12,
+  sectionHeader: {
+    flexDirection: 'row',
     alignItems: 'center',
-  },
-  disabledButton: {
-    backgroundColor: '#ccc',
-  },
-  confirmButtonText: {
-    color: 'white',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  bookingDetailsContainer: {
-    padding: 20,
-    backgroundColor: '#f8f8ff',
-    marginHorizontal: 20,
-    borderRadius: 12,
-    maxHeight: 300,
+    marginBottom: 12,
+    gap: 8,
   },
   sectionTitle: {
     fontSize: 16,
     fontWeight: '600',
-    marginBottom: 16,
+    color: '#333',
   },
   inputGroup: {
-    marginBottom: 16,
+    marginBottom: 20,
   },
   inputLabel: {
     flexDirection: 'row',
@@ -540,38 +417,39 @@ const styles = StyleSheet.create({
   },
   labelText: {
     marginLeft: 8,
-    color: '#666',
     fontSize: 14,
+    color: '#666',
   },
   input: {
-    backgroundColor: 'white',
-    borderWidth: 1,
-    borderColor: '#ddd',
+    backgroundColor: '#f5f5f5',
     borderRadius: 8,
     padding: 12,
     fontSize: 16,
   },
-  priceInputContainer: {
+  buttonContainer: {
+    padding: 20,
+    gap: 10,
+  },
+  button: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+    padding: 16,
+    borderRadius: 12,
     gap: 8,
   },
-  priceInput: {
-    flex: 1,
+  deleteButton: {
+    backgroundColor: '#FF3B30',
   },
-  currencyButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#f5f5f5',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#ddd',
+  confirmButton: {
+    backgroundColor: '#007AFF',
   },
-  currencyButtonText: {
-    fontSize: 14,
-    color: '#333',
-    marginRight: 4,
+  disabledButton: {
+    backgroundColor: '#999',
+  },
+  buttonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });

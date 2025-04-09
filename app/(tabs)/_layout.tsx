@@ -1,5 +1,5 @@
 import { Tabs } from 'expo-router';
-import { Calendar, Chrome as Home, Settings, CirclePlus as PlusCircle } from 'lucide-react-native';
+import { Calendar, Home, Settings, PlusCircle } from 'lucide-react-native';
 
 export default function TabLayout() {
   return (

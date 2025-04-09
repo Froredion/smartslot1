@@ -8,21 +8,17 @@ import {
   TextInput,
   Platform,
   ScrollView,
+  Alert,
 } from 'react-native';
-import { X, Trash2, Search, Check } from 'lucide-react-native';
-
-interface Asset {
-  id: string;
-  name: string;
-  type: string;
-  description?: string;
-  status: 'Available' | 'Unavailable';
-}
+import { X, Trash2, Search, Check, Clock } from 'lucide-react-native';
+import { TimeSlotManagerModal } from './TimeSlotManagerModal';
+import { DeleteConfirmationModal } from './DeleteConfirmationModal';
+import type { Asset, TimeSlot } from '@/lib/firebase/firestore';
 
 interface AssetEditModalProps {
   visible: boolean;
   onClose: () => void;
-  onSave: (asset: Asset) => void;
+  onSave: (asset: Omit<Asset, 'id' | 'createdAt' | 'updatedAt'>) => void;
   onDelete: (assetId: string) => void;
   asset: Asset | null;
   categories: string[];
@@ -38,40 +34,83 @@ export function AssetEditModal({
   categories,
   isNewAsset = false,
 }: AssetEditModalProps) {
-  const [editedAsset, setEditedAsset] = useState<Asset | null>(
-    asset || {
-      id: Date.now().toString(),
-      name: '',
-      type: '',
-      status: 'Available',
-    }
-  );
+  const [editedAsset, setEditedAsset] = useState<Asset | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [showCategorySearch, setShowCategorySearch] = useState(false);
+  const [showTimeSlotManager, setShowTimeSlotManager] = useState(false);
+  const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
 
+  // Update editedAsset when the asset prop changes
   React.useEffect(() => {
-    setEditedAsset(
-      asset || {
-        id: Date.now().toString(),
-        name: '',
-        type: '',
-        status: 'Available',
+    if (visible) {
+      if (isNewAsset && categories.length > 0) {
+        // For new assets, set default values including the first category
+        setEditedAsset({
+          id: Date.now().toString(),
+          name: '',
+          type: categories[0], // Set first category as default
+          status: 'Available',
+          description: '',
+          pricePerDay: 0,
+          currency: 'USD',
+          bookingType: 'full-day',
+          timeSlots: [],
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        });
+      } else {
+        setEditedAsset(asset || {
+          id: Date.now().toString(),
+          name: '',
+          type: '',
+          status: 'Available',
+          description: '',
+          pricePerDay: 0,
+          currency: 'USD',
+          bookingType: 'full-day',
+          timeSlots: [],
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        });
       }
-    );
-  }, [asset]);
+    }
+  }, [asset, visible, isNewAsset, categories]);
 
   const handleSave = () => {
-    if (editedAsset) {
-      onSave(editedAsset);
-      onClose();
-    }
+    if (!editedAsset) return;
+    console.log('AssetEditModal - Saving asset:', editedAsset);
+
+    // Clean up the asset data before saving
+    const cleanAsset = {
+      name: editedAsset.name || '',
+      type: editedAsset.type || '',
+      status: editedAsset.status || 'Available',
+      description: editedAsset.description || '',
+      pricePerDay: editedAsset.pricePerDay || 0,
+      currency: editedAsset.currency || 'USD',
+      bookingType: editedAsset.bookingType || 'full-day',
+      timeSlots: editedAsset.timeSlots || [],
+      maxBookingsPerDay: editedAsset.maxBookingsPerDay,
+    };
+
+    onSave(cleanAsset);
+    handleClose();
   };
 
   const handleDelete = () => {
-    if (editedAsset) {
-      onDelete(editedAsset.id);
-      onClose();
+    if (!editedAsset?.id) {
+      console.error('AssetEditModal - Cannot delete: No asset ID');
+      return;
     }
+    setShowDeleteConfirmation(true);
+  };
+
+  const handleClose = () => {
+    console.log('AssetEditModal - Closing modal');
+    setShowCategorySearch(false);
+    setSearchQuery('');
+    setEditedAsset(null);
+    onClose();
   };
 
   const filteredCategories = useMemo(() => {
@@ -82,12 +121,6 @@ export function AssetEditModal({
     );
   }, [categories, searchQuery]);
 
-  const handleClose = () => {
-    setShowCategorySearch(false);
-    setSearchQuery('');
-    onClose();
-  };
-
   if (!editedAsset) return null;
 
   return (
@@ -97,16 +130,8 @@ export function AssetEditModal({
       transparent={true}
       onRequestClose={handleClose}
     >
-      <TouchableOpacity
-        style={styles.modalOverlay}
-        activeOpacity={1}
-        onPress={handleClose}
-      >
-        <TouchableOpacity
-          style={styles.modalContent}
-          activeOpacity={1}
-          onPress={e => e.stopPropagation()}
-        >
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalContent}>
           <View style={styles.modalHeader}>
             <Text style={styles.modalTitle}>
               {isNewAsset ? 'New Asset' : 'Edit Asset'}
@@ -121,7 +146,7 @@ export function AssetEditModal({
               <Text style={styles.label}>Name</Text>
               <TextInput
                 style={styles.input}
-                value={editedAsset.name}
+                value={editedAsset.name || ''}
                 onChangeText={(text) => setEditedAsset({ ...editedAsset, name: text })}
                 placeholder="Asset name"
               />
@@ -146,13 +171,81 @@ export function AssetEditModal({
               <Text style={styles.label}>Description</Text>
               <TextInput
                 style={[styles.input, styles.textArea]}
-                value={editedAsset.description}
+                value={editedAsset.description || ''}
                 onChangeText={(text) => setEditedAsset({ ...editedAsset, description: text })}
                 placeholder="Asset description"
                 multiline
                 numberOfLines={4}
               />
             </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Price per Day</Text>
+              <TextInput
+                style={styles.input}
+                value={editedAsset.pricePerDay?.toString() || '0'}
+                onChangeText={(text) => {
+                  const price = parseFloat(text) || 0;
+                  setEditedAsset({ ...editedAsset, pricePerDay: price });
+                }}
+                keyboardType="numeric"
+                placeholder="Enter price per day"
+              />
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Booking Type</Text>
+              <View style={styles.bookingTypeContainer}>
+                <TouchableOpacity
+                  style={[
+                    styles.bookingTypeButton,
+                    editedAsset.bookingType === 'full-day' && styles.bookingTypeActive
+                  ]}
+                  onPress={() => setEditedAsset({ ...editedAsset, bookingType: 'full-day' })}
+                >
+                  <Text style={[
+                    styles.bookingTypeText,
+                    editedAsset.bookingType === 'full-day' && styles.bookingTypeTextActive
+                  ]}>Full Day</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.bookingTypeButton,
+                    editedAsset.bookingType === 'time-slots' && styles.bookingTypeActive
+                  ]}
+                  onPress={() => setEditedAsset({ ...editedAsset, bookingType: 'time-slots' })}
+                >
+                  <Text style={[
+                    styles.bookingTypeText,
+                    editedAsset.bookingType === 'time-slots' && styles.bookingTypeTextActive
+                  ]}>Time Slots</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {editedAsset.bookingType === 'time-slots' && (
+              <View style={styles.inputGroup}>
+                <View style={styles.timeSlotHeader}>
+                  <Text style={styles.label}>Time Slots</Text>
+                  <TouchableOpacity
+                    style={styles.manageTimeSlotsButton}
+                    onPress={() => setShowTimeSlotManager(true)}
+                  >
+                    <Clock size={20} color="#007AFF" />
+                    <Text style={styles.manageTimeSlotsText}>
+                      {editedAsset.timeSlots?.length 
+                        ? `Manage ${editedAsset.timeSlots.length} Slots`
+                        : 'Add Time Slots'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+                {(!editedAsset.timeSlots || editedAsset.timeSlots.length === 0) && (
+                  <Text style={styles.noTimeSlotsText}>
+                    No time slots configured
+                  </Text>
+                )}
+              </View>
+            )}
 
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Status</Text>
@@ -197,9 +290,13 @@ export function AssetEditModal({
             )}
 
             <TouchableOpacity
-              style={[styles.button, styles.saveButton]}
+              style={[
+                styles.button, 
+                styles.saveButton,
+                (!editedAsset.name?.trim() || !editedAsset.type) && styles.disabledButton
+              ]}
               onPress={handleSave}
-              disabled={!editedAsset.name.trim() || !editedAsset.type}
+              disabled={!editedAsset.name?.trim() || !editedAsset.type}
             >
               <Text style={styles.buttonText}>
                 {isNewAsset ? 'Create Asset' : 'Save Changes'}
@@ -279,8 +376,32 @@ export function AssetEditModal({
               </View>
             </View>
           </Modal>
-        </TouchableOpacity>
-      </TouchableOpacity>
+
+          {/* Time Slot Manager Modal */}
+          <TimeSlotManagerModal
+            visible={showTimeSlotManager}
+            onClose={() => setShowTimeSlotManager(false)}
+            onSave={(timeSlots) => {
+              setEditedAsset({ ...editedAsset, timeSlots });
+              setShowTimeSlotManager(false);
+            }}
+            initialTimeSlots={editedAsset.timeSlots || []}
+          />
+
+          <DeleteConfirmationModal
+            visible={showDeleteConfirmation}
+            onClose={() => setShowDeleteConfirmation(false)}
+            onConfirm={() => {
+              console.log('AssetEditModal - Deleting asset:', editedAsset?.id);
+              onDelete(editedAsset!.id);
+              handleClose(); // Close the modal after deletion
+              setShowDeleteConfirmation(false);
+            }}
+            title="Delete Asset"
+            message="Are you sure you want to delete this asset? This action cannot be undone and will remove all associated bookings."
+          />
+        </View>
+      </View>
     </Modal>
   );
 }
@@ -350,6 +471,7 @@ const styles = StyleSheet.create({
     padding: 20,
     borderTopWidth: 1,
     borderTopColor: '#eee',
+    gap: 12,
   },
   button: {
     flexDirection: 'row',
@@ -358,13 +480,15 @@ const styles = StyleSheet.create({
     padding: 16,
     borderRadius: 12,
     flex: 1,
-    marginHorizontal: 8,
   },
   deleteButton: {
     backgroundColor: '#FF3B30',
   },
   saveButton: {
     backgroundColor: '#007AFF',
+  },
+  disabledButton: {
+    backgroundColor: '#999',
   },
   buttonText: {
     color: 'white',
@@ -388,35 +512,13 @@ const styles = StyleSheet.create({
   placeholderText: {
     color: '#999',
   },
-  statusContainer: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  statusButton: {
-    flex: 1,
-    padding: 12,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#ddd',
-    alignItems: 'center',
-  },
-  statusButtonActive: {
-    backgroundColor: '#007AFF',
-    borderColor: '#007AFF',
-  },
-  statusButtonText: {
-    fontSize: 16,
-    color: '#666',
-  },
-  statusButtonTextActive: {
-    color: 'white',
-  },
   searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#f0f0f0',
     borderRadius: 8,
     paddingHorizontal: 12,
+    marginHorizontal: 20,
     marginBottom: 16,
   },
   searchInput: {
@@ -430,7 +532,7 @@ const styles = StyleSheet.create({
     padding: 4,
   },
   categoryList: {
-    maxHeight: 400,
+    paddingHorizontal: 20,
   },
   categoryItem: {
     flexDirection: 'row',
@@ -459,4 +561,73 @@ const styles = StyleSheet.create({
     color: '#666',
     fontSize: 16,
   },
-}); 
+  statusContainer: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  statusButton: {
+    flex: 1,
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#ddd',
+    alignItems: 'center',
+  },
+  statusButtonActive: {
+    backgroundColor: '#007AFF',
+    borderColor: '#007AFF',
+  },
+  statusButtonText: {
+    fontSize: 16,
+    color: '#666',
+  },
+  statusButtonTextActive: {
+    color: 'white',
+  },
+  bookingTypeContainer: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  bookingTypeButton: {
+    flex: 1,
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#ddd',
+    alignItems: 'center',
+  },
+  bookingTypeActive: {
+    backgroundColor: '#007AFF',
+    borderColor: '#007AFF',
+  },
+  bookingTypeText: {
+    fontSize: 16,
+    color: '#666',
+  },
+  bookingTypeTextActive: {
+    color: 'white',
+  },
+  timeSlotHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  manageTimeSlotsButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  manageTimeSlotsText: {
+    color: '#007AFF',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  noTimeSlotsText: {
+    color: '#666',
+    fontSize: 14,
+    fontStyle: 'italic',
+  },
+});
+
+export { AssetEditModal }

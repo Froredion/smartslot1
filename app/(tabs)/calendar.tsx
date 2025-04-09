@@ -1,45 +1,33 @@
-import React, { useState, useMemo } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, FlatList } from 'react-native';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  FlatList,
+  ActivityIndicator,
+  Platform,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import CalendarStrip from 'react-native-calendar-strip';
 import { format, addDays, isSameDay, isValid } from 'date-fns';
 import { BookingModal } from '@/components/BookingModal';
+import { subscribeToBookings, createBooking, updateBooking, deleteBooking } from '@/lib/firebase/firestore';
+import { auth } from '@/lib/firebase/config';
+import { AlertCircle } from 'lucide-react-native';
 
-// Temporary mock data
+// Temporary mock data for assets until we implement asset management
 const MOCK_ASSETS = [
   { id: '1', name: 'Car A-123', type: 'Vehicle', pricePerDay: 50, currency: 'USD' },
   { id: '2', name: 'Room 201', type: 'Room', pricePerDay: 100, currency: 'USD' },
   { id: '3', name: 'Villa Paradise', type: 'Property', pricePerDay: 200, currency: 'USD' },
 ];
 
-const MOCK_BOOKINGS = [
-  { 
-    id: '1', 
-    assetId: '1', 
-    date: new Date(2024, 0, 20),
-    description: 'Business trip',
-    bookedBy: 'John Doe',
-    numberOfPeople: 2,
-    customPrice: 60,
-    currency: 'USD'
-  },
-  { 
-    id: '2', 
-    assetId: '2', 
-    date: new Date(2024, 0, 22),
-    description: 'Team meeting',
-    bookedBy: 'Jane Smith',
-    numberOfPeople: 5,
-    customPrice: 120,
-    currency: 'USD'
-  },
-];
-
 const getAvailabilityColor = (percentage: number) => {
-  if (percentage === 100) return '#FF3B30'; // Red for fully booked (0% available)
-  if (percentage <= 33) return '#34C759'; // Green for high availability (66%+ available)
-  if (percentage <= 66) return '#FFCC00'; // Yellow for medium availability (33-66% available)
-  return '#FF9500'; // Orange for low availability (less than 33% available)
+  if (percentage === 100) return '#FF3B30';
+  if (percentage <= 33) return '#34C759';
+  if (percentage <= 66) return '#FFCC00';
+  return '#FF9500';
 };
 
 export default function Calendar() {
@@ -47,9 +35,35 @@ export default function Calendar() {
   const [selectedDate, setSelectedDate] = useState<Date | null>(new Date());
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedAsset, setSelectedAsset] = useState<string | null>(null);
+  const [selectedBooking, setSelectedBooking] = useState<any | null>(null);
+  const [bookings, setBookings] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
-  // Calculate availability for a specific date
-  const getDateAvailability = (date: Date | null) => {
+  useEffect(() => {
+    let unsubscribe: (() => void) | undefined;
+
+    const setupBookingsSubscription = async () => {
+      try {
+        setError(null);
+        unsubscribe = subscribeToBookings((updatedBookings) => {
+          setBookings(updatedBookings);
+          setLoading(false);
+          setRefreshing(false);
+        });
+      } catch (err: any) {
+        setError(err.message || 'Failed to load bookings');
+        setLoading(false);
+        setRefreshing(false);
+      }
+    };
+
+    setupBookingsSubscription();
+    return () => unsubscribe?.();
+  }, []);
+
+  const getDateAvailability = useCallback((date: Date | null) => {
     if (!date || !isValid(date)) {
       return {
         bookedCount: 0,
@@ -58,7 +72,7 @@ export default function Calendar() {
       };
     }
 
-    const bookedAssets = MOCK_BOOKINGS.filter(booking => 
+    const bookedAssets = bookings.filter(booking => 
       isSameDay(booking.date, date)
     ).length;
     return {
@@ -66,14 +80,13 @@ export default function Calendar() {
       availableCount: MOCK_ASSETS.length - bookedAssets,
       percentage: (bookedAssets / MOCK_ASSETS.length) * 100
     };
-  };
+  }, [bookings]);
 
-  // Generate marked dates for the calendar
   const markedDates = useMemo(() => {
     const dates = [];
     const today = new Date();
-    const startDate = new Date(today.getFullYear() - 1, today.getMonth(), today.getDate()); // Allow viewing 1 year back
-    const endDate = new Date(today.getFullYear() + 1, today.getMonth(), today.getDate()); // Allow viewing 1 year ahead
+    const startDate = new Date(today.getFullYear() - 1, today.getMonth(), today.getDate());
+    const endDate = new Date(today.getFullYear() + 1, today.getMonth(), today.getDate());
     
     let currentDate = new Date(startDate);
     while (currentDate <= endDate) {
@@ -88,51 +101,83 @@ export default function Calendar() {
       currentDate = addDays(currentDate, 1);
     }
     return dates;
-  }, []);
+  }, [getDateAvailability]);
 
   const handleDateSelect = (date: Date) => {
     if (isValid(date)) {
-      console.log('Date selected:', date);
       setSelectedDate(date);
+      setSelectedAsset(null);
+      setSelectedBooking(null);
       setModalVisible(true);
-      console.log('Modal visibility set to true');
     }
   };
 
-  const handleBookingConfirm = (bookingDetails: Omit<Booking, 'id'>) => {
-    if (selectedDate) {
-      const newBooking: Booking = {
-        id: Date.now().toString(), // Simple ID generation
-        ...bookingDetails,
-      };
-      MOCK_BOOKINGS.push(newBooking);
-      console.log('Booking confirmed:', newBooking);
+  const handleBookingConfirm = async (bookingDetails: any) => {
+    if (!selectedDate || !auth.currentUser) return;
+
+    try {
+      setError(null);
+      if (selectedBooking) {
+        await updateBooking(selectedBooking.id, {
+          ...bookingDetails,
+          date: selectedDate,
+        });
+      } else {
+        await createBooking({
+          ...bookingDetails,
+          date: selectedDate,
+          bookedBy: auth.currentUser.email || 'Anonymous',
+        });
+      }
+      handleCloseModal();
+    } catch (err: any) {
+      setError(err.message || 'Failed to save booking');
     }
+  };
+
+  const handleDeleteBooking = async (bookingId: string) => {
+    try {
+      setError(null);
+      await deleteBooking(bookingId);
+      handleCloseModal();
+    } catch (err: any) {
+      setError(err.message || 'Failed to delete booking');
+    }
+  };
+
+  const handleCloseModal = () => {
     setModalVisible(false);
+    setSelectedAsset(null);
+    setSelectedBooking(null);
+    setError(null);
+  };
+
+  const handleEditBooking = (booking: any) => {
+    setSelectedDate(booking.date);
+    setSelectedBooking(booking);
+    setSelectedAsset(booking.assetId);
+    setModalVisible(true);
   };
 
   const availability = getDateAvailability(selectedDate);
 
-  // Filter available assets for the selected date
-  const availableAssets = MOCK_ASSETS.filter(asset => 
-    !MOCK_BOOKINGS.some(booking => 
-      booking.assetId === asset.id && selectedDate && isSameDay(booking.date, selectedDate)
-    )
-  );
-
   const renderAssetItem = ({ item: asset }) => {
-    const isBooked = MOCK_BOOKINGS.some(booking => 
-      booking.assetId === asset.id && selectedDate && isSameDay(booking.date, selectedDate)
+    const booking = bookings.find(b => 
+      b.assetId === asset.id && selectedDate && isSameDay(b.date, selectedDate)
     );
+    const isBooked = !!booking;
     
     return (
       <TouchableOpacity
         style={styles.assetCard}
         onPress={() => {
-          setSelectedAsset(asset.id);
-          setModalVisible(true);
+          if (isBooked) {
+            handleEditBooking(booking);
+          } else {
+            setSelectedAsset(asset.id);
+            setModalVisible(true);
+          }
         }}
-        disabled={isBooked}
       >
         <View style={styles.assetHeader}>
           <Text style={styles.assetName}>{asset.name}</Text>
@@ -154,14 +199,37 @@ export default function Calendar() {
         </View>
         <Text style={styles.assetType}>{asset.type}</Text>
         <Text style={styles.assetPrice}>${asset.pricePerDay} per day</Text>
+        {isBooked && (
+          <View style={styles.bookingDetails}>
+            <Text style={styles.bookingText}>Booked by: {booking.bookedBy}</Text>
+            {booking.description && (
+              <Text style={styles.bookingText}>{booking.description}</Text>
+            )}
+            {booking.numberOfPeople && (
+              <Text style={styles.bookingText}>People: {booking.numberOfPeople}</Text>
+            )}
+            {booking.customPrice && (
+              <Text style={styles.bookingText}>
+                Custom Price: {booking.currency} {booking.customPrice}
+              </Text>
+            )}
+          </View>
+        )}
       </TouchableOpacity>
     );
   };
 
+  if (loading) {
+    return (
+      <View style={[styles.container, styles.loadingContainer]}>
+        <ActivityIndicator size="large" color="#007AFF" />
+        <Text style={styles.loadingText}>Loading bookings...</Text>
+      </View>
+    );
+  }
+
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
-      {console.log('Current selectedDate:', selectedDate)}
-      {console.log('Current modalVisible:', modalVisible)}
       <View style={styles.header}>
         <Text style={styles.title}>Book an Asset</Text>
       </View>
@@ -176,8 +244,8 @@ export default function Calendar() {
         calendarColor={'#ffffff'}
         calendarHeaderFormat={'MMMM yyyy'}
         onDateSelected={handleDateSelect}
-        minDate={addDays(new Date(), -365)} // Allow viewing 1 year back
-        maxDate={addDays(new Date(), 365)} // Allow viewing 1 year ahead
+        minDate={addDays(new Date(), -365)}
+        maxDate={addDays(new Date(), 365)}
         scrollable
         upperCaseDays={false}
         markedDates={markedDates}
@@ -201,22 +269,39 @@ export default function Calendar() {
         </View>
       </View>
 
+      {error && (
+        <View style={styles.errorContainer}>
+          <AlertCircle size={20} color="#FF3B30" />
+          <Text style={styles.errorText}>{error}</Text>
+        </View>
+      )}
+
       <FlatList
         data={MOCK_ASSETS}
         renderItem={renderAssetItem}
         keyExtractor={item => item.id}
         contentContainerStyle={styles.listContainer}
         showsVerticalScrollIndicator={false}
+        refreshing={refreshing}
+        onRefresh={() => {
+          setRefreshing(true);
+          // The subscription will automatically update the data
+        }}
       />
 
       {selectedDate && (
         <BookingModal
           visible={modalVisible}
-          onClose={() => setModalVisible(false)}
+          onClose={handleCloseModal}
           onConfirm={handleBookingConfirm}
+          onDelete={handleDeleteBooking}
           selectedDate={selectedDate}
-          assets={[MOCK_ASSETS.find(a => a.id === selectedAsset)].filter(Boolean)}
-          bookings={MOCK_BOOKINGS}
+          assets={selectedAsset 
+            ? [MOCK_ASSETS.find(a => a.id === selectedAsset)].filter(Boolean)
+            : MOCK_ASSETS}
+          bookings={bookings}
+          initialAssetId={selectedAsset}
+          editBooking={selectedBooking}
         />
       )}
     </View>
@@ -227,6 +312,15 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
+  },
+  loadingContainer: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 16,
+  },
+  loadingText: {
+    fontSize: 16,
+    color: '#666',
   },
   header: {
     padding: 20,
@@ -294,6 +388,21 @@ const styles = StyleSheet.create({
     color: '#666',
     fontWeight: '500',
   },
+  errorContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFE5E5',
+    padding: 12,
+    marginHorizontal: 20,
+    marginTop: 12,
+    borderRadius: 8,
+    gap: 8,
+  },
+  errorText: {
+    flex: 1,
+    color: '#FF3B30',
+    fontSize: 14,
+  },
   listContainer: {
     padding: 20,
   },
@@ -346,5 +455,16 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#007AFF',
     fontWeight: '600',
+  },
+  bookingDetails: {
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#f0f0f0',
+  },
+  bookingText: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 4,
   },
 });

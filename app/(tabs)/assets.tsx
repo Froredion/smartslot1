@@ -1,66 +1,82 @@
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, ScrollView, ActivityIndicator } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Plus } from 'lucide-react-native';
-import { useState } from 'react';
+import { Plus, AlertCircle } from 'lucide-react-native';
+import { useState, useEffect } from 'react';
 import { AssetEditModal } from '@/components/AssetEditModal';
 import { CategoryManager } from '@/components/CategoryManager';
-
-interface Asset {
-  id: string;
-  name: string;
-  type: string;
-  description?: string;
-  status: string;
-}
-
-const SAMPLE_ASSETS: Asset[] = [
-  { id: '1', name: 'Car A-123', type: 'Vehicle', status: 'Available', description: 'Luxury sedan' },
-  { id: '2', name: 'Room 201', type: 'Room', status: 'Booked', description: 'Conference room' },
-  { id: '3', name: 'Villa Paradise', type: 'Property', status: 'Available', description: 'Beachfront property' },
-];
-
-const DEFAULT_CATEGORIES = [
-  'Vehicle',
-  'Room',
-  'Property',
-  'Equipment',
-  'Electronics',
-  'Furniture',
-  'Tools',
-  'Office',
-  'Storage',
-  'Outdoor',
-  'Kitchen',
-  'Sports',
-  'Audio',
-  'Video',
-  'Gaming',
-  'Medical',
-  'Laboratory',
-  'Workshop',
-  'Event',
-  'Transportation'
-];
+import { auth } from '@/lib/firebase/config';
+import { subscribeToUserProfile, addCategory, removeCategory, subscribeToAssets, createAsset, updateAsset, deleteAsset } from '@/lib/firebase/firestore';
+import type { Asset } from '@/lib/firebase/firestore';
 
 export default function Assets() {
   const insets = useSafeAreaInsets();
-  const [assets, setAssets] = useState<Asset[]>(SAMPLE_ASSETS);
-  const [categories, setCategories] = useState<string[]>(DEFAULT_CATEGORIES);
+  const [assets, setAssets] = useState<Asset[]>([]);
+  const [categories, setCategories] = useState<string[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
   const [isNewAsset, setIsNewAsset] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
-  const handleAddCategory = (category: string) => {
-    if (!categories.includes(category)) {
-      setCategories([...categories, category]);
+  useEffect(() => {
+    let unsubscribeProfile: (() => void) | undefined;
+    let unsubscribeAssets: (() => void) | undefined;
+
+    const setupSubscriptions = async () => {
+      if (!auth.currentUser) return;
+
+      try {
+        setError(null);
+        
+        // Subscribe to user profile for categories
+        unsubscribeProfile = subscribeToUserProfile(auth.currentUser.uid, (profile) => {
+          if (profile) {
+            setCategories(profile.categories || []);
+          }
+        });
+
+        // Subscribe to assets
+        unsubscribeAssets = subscribeToAssets((updatedAssets) => {
+          setAssets(updatedAssets);
+          setLoading(false);
+        });
+      } catch (err: any) {
+        setError(err.message || 'Failed to load data');
+        setLoading(false);
+      }
+    };
+
+    setupSubscriptions();
+    return () => {
+      unsubscribeProfile?.();
+      unsubscribeAssets?.();
+    };
+  }, []);
+
+  const handleAddCategory = async (category: string) => {
+    if (!auth.currentUser) return;
+
+    try {
+      setError(null);
+      await addCategory(auth.currentUser.uid, category);
+    } catch (err: any) {
+      setError(err.message || 'Failed to add category');
     }
   };
 
-  const handleDeleteCategory = (category: string) => {
-    setCategories(categories.filter(c => c !== category));
-    if (selectedCategory === category) {
-      setSelectedCategory(null);
+  const handleDeleteCategory = async (category: string) => {
+    if (!auth.currentUser) return;
+
+    try {
+      setError(null);
+      await removeCategory(auth.currentUser.uid, category);
+      if (selectedCategory === category) {
+        setSelectedCategory(null);
+      }
+    } catch (err: any) {
+      setError(err.message || 'Failed to remove category');
     }
   };
 
@@ -76,18 +92,41 @@ export default function Assets() {
     setEditModalVisible(true);
   };
 
-  const handleSaveAsset = (updatedAsset: Asset) => {
-    if (isNewAsset) {
-      setAssets([...assets, updatedAsset]);
-    } else {
-      setAssets(assets.map(asset => 
-        asset.id === updatedAsset.id ? updatedAsset : asset
-      ));
+  const handleSaveAsset = async (updatedAsset: Omit<Asset, 'id' | 'createdAt' | 'updatedAt'>) => {
+    try {
+      setError(null);
+      if (isNewAsset) {
+        await createAsset(updatedAsset);
+      } else if (selectedAsset) {
+        await updateAsset(selectedAsset.id, updatedAsset);
+      }
+      setEditModalVisible(false);
+      setSelectedAsset(null);
+      setIsNewAsset(false);
+    } catch (err: any) {
+      setError(err.message || 'Failed to save asset');
     }
   };
 
-  const handleDeleteAsset = (assetId: string) => {
-    setAssets(assets.filter(asset => asset.id !== assetId));
+  const handleDeleteAsset = async (assetId: string) => {
+    if (isDeleting) return;
+
+    try {
+      setIsDeleting(true);
+      setError(null);
+      console.log('Assets - Starting asset deletion:', assetId);
+      
+      await deleteAsset(assetId);
+      console.log('Assets - Asset deleted successfully:', assetId);
+      
+      setEditModalVisible(false);
+      setSelectedAsset(null);
+    } catch (err: any) {
+      console.error('Assets - Error deleting asset:', err);
+      setError(err.message || 'Failed to delete asset');
+    } finally {
+      setIsDeleting(false);
+    }
   };
 
   const filteredAssets = selectedCategory
@@ -109,11 +148,28 @@ export default function Assets() {
         </Text>
       </View>
       <Text style={styles.assetType}>{item.type}</Text>
+      <Text style={styles.assetPrice}>
+        {item.currency} {item.pricePerDay} per day
+      </Text>
       {item.description && (
         <Text style={styles.assetDescription}>{item.description}</Text>
       )}
+      {item.bookingType === 'time-slots' && item.timeSlots && item.timeSlots.length > 0 && (
+        <Text style={styles.timeSlots}>
+          {item.timeSlots.length} time slot{item.timeSlots.length !== 1 ? 's' : ''} configured
+        </Text>
+      )}
     </TouchableOpacity>
   );
+
+  if (loading) {
+    return (
+      <View style={[styles.container, styles.loadingContainer]}>
+        <ActivityIndicator size="large" color="#007AFF" />
+        <Text style={styles.loadingText}>Loading assets...</Text>
+      </View>
+    );
+  }
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -126,6 +182,13 @@ export default function Assets() {
           <Plus size={24} color="white" />
         </TouchableOpacity>
       </View>
+
+      {error && (
+        <View style={styles.errorContainer}>
+          <AlertCircle size={20} color="#FF3B30" />
+          <Text style={styles.errorText}>{error}</Text>
+        </View>
+      )}
 
       <CategoryManager
         categories={categories}
@@ -176,6 +239,7 @@ export default function Assets() {
           setEditModalVisible(false);
           setSelectedAsset(null);
           setIsNewAsset(false);
+          setError(null);
         }}
         onSave={handleSaveAsset}
         onDelete={handleDeleteAsset}
@@ -191,6 +255,15 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
+  },
+  loadingContainer: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 16,
+  },
+  loadingText: {
+    fontSize: 16,
+    color: '#666',
   },
   header: {
     flexDirection: 'row',
@@ -209,6 +282,21 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  errorContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFE5E5',
+    padding: 12,
+    marginHorizontal: 20,
+    marginBottom: 12,
+    borderRadius: 8,
+    gap: 8,
+  },
+  errorText: {
+    flex: 1,
+    color: '#FF3B30',
+    fontSize: 14,
   },
   categoryFilter: {
     flexDirection: 'row',
@@ -266,9 +354,21 @@ const styles = StyleSheet.create({
     color: '#666',
     marginBottom: 4,
   },
+  assetPrice: {
+    fontSize: 14,
+    color: '#007AFF',
+    fontWeight: '600',
+    marginBottom: 4,
+  },
   assetDescription: {
     fontSize: 14,
     color: '#666',
     marginTop: 4,
+  },
+  timeSlots: {
+    fontSize: 14,
+    color: '#666',
+    marginTop: 8,
+    fontStyle: 'italic',
   },
 });

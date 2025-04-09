@@ -74,14 +74,14 @@ export function CategoryManager({
             style={styles.removeButton}
             onPress={() => setRemoveModalVisible(true)}
           >
-            <Text style={styles.removeButtonText}>Remove Categories</Text>
+            <Text style={styles.removeButtonText}>Remove</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.addButton}
             onPress={() => setAddModalVisible(true)}
           >
-            <Plus size={20} color="white" />
-            <Text style={styles.addButtonText}>Add Category</Text>
+            <Plus size={16} color="white" />
+            <Text style={styles.addButtonText}>Add</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -242,26 +242,32 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#007AFF',
-    paddingHorizontal: 12,
+    paddingHorizontal: 10,
     paddingVertical: 6,
-    borderRadius: 8,
+    borderRadius: 6,
+    minWidth: 75,
+    justifyContent: 'center',
   },
   removeButton: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#FF3B30',
-    paddingHorizontal: 12,
+    paddingHorizontal: 10,
     paddingVertical: 6,
-    borderRadius: 8,
+    borderRadius: 6,
+    minWidth: 75,
+    justifyContent: 'center',
   },
   addButtonText: {
     color: 'white',
     marginLeft: 4,
     fontWeight: '500',
+    fontSize: 14,
   },
   removeButtonText: {
     color: 'white',
     fontWeight: '500',
+    fontSize: 14,
   },
   modalOverlay: {
     flex: 1,
@@ -374,4 +380,4 @@ const styles = StyleSheet.create({
     color: '#666',
     fontSize: 16,
   },
-}); 
+});
