@@ -13,6 +13,7 @@ import {
 import { Link, router } from 'expo-router';
 import { Mail, Lock, ArrowRight } from 'lucide-react-native';
 import { signIn } from '@/lib/firebase/auth';
+import { StyledIcon } from '@/components/StyledIcon';
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -63,26 +64,30 @@ export default function Login() {
           )}
 
           <View style={styles.inputContainer}>
-            <Mail size={20} color="#666" style={styles.inputIcon} />
-            <TextInput
-              style={styles.input}
-              placeholder="Email"
-              value={email}
-              onChangeText={setEmail}
-              autoCapitalize="none"
-              keyboardType="email-address"
-            />
+            <View style={styles.inputWrapper}>
+              <StyledIcon name="Mail" size={20} color="#666" style={styles.inputIcon} />
+              <TextInput
+                style={styles.input}
+                placeholder="Username or Email"
+                value={email}
+                onChangeText={setEmail}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+            </View>
           </View>
 
-          <View style={styles.inputContainer}>
-            <Lock size={20} color="#666" style={styles.inputIcon} />
-            <TextInput
-              style={styles.input}
-              placeholder="Password"
-              value={password}
-              onChangeText={setPassword}
-              secureTextEntry
-            />
+          <View style={[styles.inputContainer, styles.spacingTop]}>
+            <View style={styles.inputWrapper}>
+              <StyledIcon name="Lock" size={20} color="#666" style={styles.inputIcon} />
+              <TextInput
+                style={styles.input}
+                placeholder="Password"
+                value={password}
+                onChangeText={setPassword}
+                secureTextEntry
+              />
+            </View>
           </View>
 
           <Link href="/auth/reset-password" asChild>
@@ -92,7 +97,7 @@ export default function Login() {
           </Link>
 
           <TouchableOpacity
-            style={styles.button}
+            style={[styles.button, loading && styles.disabledButton]}
             onPress={handleLogin}
             disabled={loading}
           >
@@ -100,8 +105,8 @@ export default function Login() {
               <ActivityIndicator color="white" />
             ) : (
               <>
-                <Text style={styles.buttonText}>Sign In</Text>
-                <ArrowRight size={20} color="white" />
+                <Text style={styles.buttonText}>Login</Text>
+                <StyledIcon name="ArrowRight" size={20} color="white" />
               </>
             )}
           </TouchableOpacity>
@@ -174,20 +179,21 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   inputContainer: {
+    width: '100%',
+  },
+  inputWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#f5f5f5',
-    borderRadius: 12,
-    marginBottom: 16,
-    padding: 4,
+    borderRadius: 8,
+    paddingHorizontal: 12,
   },
   inputIcon: {
-    padding: 12,
+    padding: 8,
   },
   input: {
     flex: 1,
     paddingVertical: 12,
-    paddingRight: 12,
     fontSize: 16,
   },
   forgotPassword: {
@@ -206,6 +212,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'center',
     gap: 8,
+  },
+  disabledButton: {
+    backgroundColor: '#999',
   },
   buttonText: {
     color: 'white',
@@ -227,5 +236,8 @@ const styles = StyleSheet.create({
     color: '#007AFF',
     fontSize: 14,
     fontWeight: '600',
+  },
+  spacingTop: {
+    marginTop: 16,
   },
 });

@@ -22,14 +22,24 @@ service cloud.firestore {
         get(/databases/$(database)/documents/organizations/$(orgId)).data.ownerId == request.auth.uid;
     }
 
+    function isValidUsername(username) {
+      return username is string && 
+             username.size() >= 3 && 
+             username.matches('^[a-zA-Z0-9_]+$');
+    }
+
+    function isUsernameAvailable(username) {
+      // Check if any user has this username
+      let usersWithUsername = getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.username == username;
+      return !exists(/databases/$(database)/documents/users/$(request.auth.uid)) || usersWithUsername;
+    }
+
     // Organizations
     match /organizations/{orgId} {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated() &&
         request.resource.data.ownerId == request.auth.uid &&
-        request.resource.data.members.hasOnly([request.auth.uid]) &&
-        request.resource.data.categories is list &&
-        request.resource.data.currency is string;
+        request.resource.data.members.hasOnly([request.auth.uid]);
       allow update, delete: if isOrganizationOwner(orgId);
 
       // Subcollections
@@ -67,11 +77,16 @@ service cloud.firestore {
     match /users/{userId} {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated() && request.auth.uid == userId;
-      allow update: if isOwner(userId) || (
-        isAuthenticated() &&
-        request.resource.data.diff(resource.data).affectedKeys()
-          .hasOnly(['organizationId', 'updatedAt', 'isOwner']));
+      allow update: if isOwner(userId);
       allow delete: if false;
+    }
+
+    // Pending invites
+    match /pending_invites/{inviteId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && 
+                   request.resource.data.invitedBy == request.auth.uid;
+      allow update, delete: if false;
     }
   }
 }

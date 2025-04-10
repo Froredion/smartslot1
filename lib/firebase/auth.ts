@@ -15,11 +15,21 @@ import {
   collection,
   addDoc,
   serverTimestamp,
+  query,
+  where,
+  getDocs,
 } from 'firebase/firestore';
 import { db } from './config';
+import { checkUsernameAvailability } from './firestore';
 
-export const signUp = async (email: string, password: string) => {
+export const signUp = async (email: string, password: string, username: string) => {
   try {
+    // Check username availability first
+    const isUsernameAvailable = await checkUsernameAvailability(username);
+    if (!isUsernameAvailable) {
+      throw new Error('Username is already taken');
+    }
+
     const userCredential = await createUserWithEmailAndPassword(
       auth,
       email,
@@ -41,6 +51,7 @@ export const signUp = async (email: string, password: string) => {
       // Create user profile in Firestore
       await setDoc(doc(db, 'users', userCredential.user.uid), {
         email: userCredential.user.email || '',
+        username: username,
         displayName: '',
         organizationIds: [orgRef.id], // Store organization IDs array
         isOwner: true, // First user is always owner of their org
@@ -84,8 +95,25 @@ export const signUp = async (email: string, password: string) => {
   }
 };
 
-export const signIn = async (email: string, password: string) => {
+export const signIn = async (emailOrUsername: string, password: string) => {
   try {
+    let email = emailOrUsername;
+
+    // If the input doesn't contain '@', assume it's a username
+    if (!emailOrUsername.includes('@')) {
+      // Query Firestore to get the email associated with the username
+      const usersRef = collection(db, 'users');
+      const q = query(usersRef, where('username', '==', emailOrUsername));
+      const querySnapshot = await getDocs(q);
+
+      if (querySnapshot.empty) {
+        throw new Error('Invalid username or password');
+      }
+
+      const userDoc = querySnapshot.docs[0];
+      email = userDoc.data().email;
+    }
+
     const userCredential = await signInWithEmailAndPassword(
       auth,
       email,
@@ -132,12 +160,12 @@ export const signIn = async (email: string, password: string) => {
     return userCredential.user;
   } catch (error: any) {
     console.error('Login error:', error);
-    let message = 'Invalid email or password';
+    let message = 'Invalid username/email or password';
     if (
       error.code === 'auth/user-not-found' ||
       error.code === 'auth/wrong-password'
     ) {
-      message = 'Invalid email or password';
+      message = 'Invalid username/email or password';
     } else if (error.code === 'auth/invalid-email') {
       message = 'Invalid email address';
     } else if (error.code === 'auth/too-many-requests') {

@@ -11,59 +11,45 @@ import { router } from 'expo-router';
 import { Mail, RefreshCw, ArrowRight } from 'lucide-react-native';
 import { auth } from '@/lib/firebase/config';
 import { resendVerificationEmail } from '@/lib/firebase/auth';
+import { StyledIcon } from '@/components/StyledIcon';
 
 export default function VerifyEmail() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
   const [countdown, setCountdown] = useState(0);
 
   useEffect(() => {
-    let timer: NodeJS.Timeout;
-    if (countdown > 0) {
-      timer = setInterval(() => setCountdown(prev => prev - 1), 1000);
+    if (!auth.currentUser) {
+      router.replace('/auth/login');
     }
-    return () => clearInterval(timer);
-  }, [countdown]);
-
-  useEffect(() => {
-    const checkVerification = async () => {
-      if (!auth.currentUser) {
-        router.replace('/auth/login');
-        return;
-      }
-
-      await auth.currentUser.reload();
-      if (auth.currentUser.emailVerified) {
-        router.replace('/(tabs)');
-      }
-    };
-
-    const interval = setInterval(checkVerification, 3000);
-    return () => clearInterval(interval);
   }, []);
 
+  useEffect(() => {
+    if (countdown > 0) {
+      const timer = setTimeout(() => setCountdown(countdown - 1), 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [countdown]);
+
   const handleResendEmail = async () => {
-    if (!auth.currentUser || countdown > 0) return;
+    if (!auth.currentUser) {
+      router.replace('/auth/login');
+      return;
+    }
 
     setLoading(true);
     setError(null);
+    setSuccess(false);
 
     try {
       await resendVerificationEmail(auth.currentUser);
-      setCountdown(60); // Start 60-second countdown
+      setSuccess(true);
+      setCountdown(60);
     } catch (err: any) {
-      setError('Failed to send verification email. Please try again.');
+      setError(err.message);
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handleSignOut = async () => {
-    try {
-      await auth.signOut();
-      router.replace('/auth/login');
-    } catch (err) {
-      setError('Failed to sign out. Please try again.');
     }
   };
 
@@ -78,20 +64,20 @@ export default function VerifyEmail() {
       </View>
 
       <View style={styles.content}>
-        <View style={styles.iconContainer}>
-          <Mail size={48} color="#007AFF" />
-        </View>
+        <StyledIcon name="Mail" size={48} color="#007AFF" />
 
-        <Text style={styles.title}>Verify your email</Text>
+        <Text style={styles.title}>Verify Your Email</Text>
         <Text style={styles.description}>
           We've sent a verification email to{' '}
-          <Text style={styles.emailText}>{auth.currentUser?.email}</Text>
+          <Text style={styles.email}>{auth.currentUser?.email}</Text>
         </Text>
 
-        {error && (
-          <View style={styles.errorContainer}>
-            <Text style={styles.errorText}>{error}</Text>
-          </View>
+        {error && <Text style={styles.error}>{error}</Text>}
+
+        {success && (
+          <Text style={styles.success}>
+            Verification email sent! Please check your inbox.
+          </Text>
         )}
 
         <View style={styles.instructionsContainer}>
@@ -107,32 +93,37 @@ export default function VerifyEmail() {
           </Text>
         </View>
 
-        <TouchableOpacity
-          style={[styles.resendButton, countdown > 0 && styles.disabledButton]}
-          onPress={handleResendEmail}
-          disabled={loading || countdown > 0}
-        >
-          {loading ? (
-            <ActivityIndicator color="white" />
-          ) : (
-            <>
-              <RefreshCw size={20} color="white" />
-              <Text style={styles.resendButtonText}>
-                {countdown > 0
-                  ? `Resend email (${countdown}s)`
-                  : 'Resend verification email'}
-              </Text>
-            </>
-          )}
-        </TouchableOpacity>
+        <View style={styles.actions}>
+          <TouchableOpacity
+            style={[
+              styles.button,
+              (loading || countdown > 0) && styles.disabledButton,
+            ]}
+            onPress={handleResendEmail}
+            disabled={loading || countdown > 0}
+          >
+            {loading ? (
+              <ActivityIndicator color="white" />
+            ) : (
+              <>
+                <StyledIcon name="RefreshCw" size={20} color="white" />
+                <Text style={styles.buttonText}>
+                  {countdown > 0
+                    ? `Resend in ${countdown}s`
+                    : 'Resend Verification Email'}
+                </Text>
+              </>
+            )}
+          </TouchableOpacity>
 
-        <TouchableOpacity
-          style={styles.signOutButton}
-          onPress={handleSignOut}
-        >
-          <Text style={styles.signOutButtonText}>Sign out</Text>
-          <ArrowRight size={20} color="#FF3B30" />
-        </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.signOutButton}
+            onPress={() => router.replace('/auth/login')}
+          >
+            <StyledIcon name="ArrowRight" size={20} color="#FF3B30" />
+            <Text style={styles.signOutText}>Sign Out</Text>
+          </TouchableOpacity>
+        </View>
       </View>
     </View>
   );
@@ -167,21 +158,6 @@ const styles = StyleSheet.create({
     padding: 24,
     alignItems: 'center',
   },
-  iconContainer: {
-    width: 96,
-    height: 96,
-    borderRadius: 48,
-    backgroundColor: '#F0F8FF',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginTop: -48,
-    marginBottom: 24,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 4,
-  },
   title: {
     fontSize: 24,
     fontWeight: 'bold',
@@ -194,20 +170,16 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: 24,
   },
-  emailText: {
+  email: {
     color: '#007AFF',
     fontWeight: '600',
   },
-  errorContainer: {
-    backgroundColor: '#FFE5E5',
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 24,
-    width: '100%',
-  },
-  errorText: {
+  error: {
     color: '#FF3B30',
-    fontSize: 14,
+    textAlign: 'center',
+  },
+  success: {
+    color: '#34C759',
     textAlign: 'center',
   },
   instructionsContainer: {
@@ -228,33 +200,35 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     lineHeight: 20,
   },
-  resendButton: {
+  actions: {
+    width: '100%',
+    gap: 16,
+    marginTop: 16,
+  },
+  button: {
     backgroundColor: '#007AFF',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     padding: 16,
-    borderRadius: 12,
-    width: '100%',
+    borderRadius: 8,
     gap: 8,
   },
   disabledButton: {
     backgroundColor: '#999',
   },
-  resendButtonText: {
+  buttonText: {
     color: 'white',
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: 'bold',
   },
   signOutButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 16,
-    padding: 12,
     gap: 8,
   },
-  signOutButtonText: {
+  signOutText: {
     color: '#FF3B30',
     fontSize: 16,
     fontWeight: '600',

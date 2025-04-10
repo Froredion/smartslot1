@@ -23,7 +23,7 @@ export default function Disclaimer() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>1. No Professional Advice</Text>
           <Text style={styles.text}>
-            The information provided by SmartSlot is for general informational purposes only. While we aim to provide useful data to assist with rental management, the App:
+            The information provided by SmartFolio is for general informational purposes only. While we aim to provide useful data to assist with rental management, the App:
           </Text>
           <Text style={styles.bullet}>• Does not offer financial, legal, tax, or accounting advice.</Text>
           <Text style={styles.bullet}>• Should not be relied upon as the sole source for business decisions.</Text>
@@ -44,7 +44,7 @@ export default function Disclaimer() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>3. Limitation of Liability</Text>
           <Text style={styles.text}>
-            To the fullest extent permitted by law, SmartSlot and its creators will not be liable for:
+            To the fullest extent permitted by law, SmartFolio and its creators will not be liable for:
           </Text>
           <Text style={styles.bullet}>• Any errors or omissions in the App's content</Text>
           <Text style={styles.bullet}>• Any losses, damages, or liabilities arising from your use of or reliance on the App</Text>
@@ -57,7 +57,7 @@ export default function Disclaimer() {
             For any questions regarding this Disclaimer, contact us at:
           </Text>
           <Text style={styles.contact}>Email: ericksontalaue@gmail.com</Text>
-          <Text style={styles.contact}>Company: SmartSlot</Text>
+          <Text style={styles.contact}>Company: SmartFolio</Text>
         </View>
       </ScrollView>
     </>

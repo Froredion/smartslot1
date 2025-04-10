@@ -11,44 +11,67 @@ import {
   Image,
   ScrollView,
   Modal,
+  Alert,
 } from 'react-native';
 import { Link, router } from 'expo-router';
 import { Mail, Lock, Check, X } from 'lucide-react-native';
 import { signUp } from '@/lib/firebase/auth';
+import { validateEmail, validatePassword } from '../../lib/validation';
+import { StyledIcon } from '@/components/StyledIcon';
 
 export default function Register() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
+  const [username, setUsername] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [legalAgreement, setLegalAgreement] = useState(false);
   const [legalModalVisible, setLegalModalVisible] = useState(false);
 
   const handleRegister = async () => {
-    if (!email || !password || !confirmPassword) {
-      setError('Please fill in all fields');
-      return;
-    }
-
-    if (password !== confirmPassword) {
-      setError('Passwords do not match');
-      return;
-    }
-
-    if (!legalAgreement) {
-      setError('Please accept the legal agreements to continue');
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-
     try {
-      await signUp(email, password);
-      router.replace('/(tabs)');
-    } catch (err: any) {
-      setError(err.message);
+      setError('');
+      setLoading(true);
+
+      // Validate inputs
+      if (!email || !password || !username) {
+        setError('Please fill in all fields');
+        return;
+      }
+
+      if (!validateEmail(email)) {
+        setError('Please enter a valid email address');
+        return;
+      }
+
+      if (!validatePassword(password)) {
+        setError('Password must be at least 6 characters long');
+        return;
+      }
+
+      if (username.length < 3) {
+        setError('Username must be at least 3 characters long');
+        return;
+      }
+
+      if (!/^[a-zA-Z0-9_]+$/.test(username)) {
+        setError('Username can only contain letters, numbers, and underscores');
+        return;
+      }
+
+      if (!legalAgreement) {
+        setError('Please accept the legal agreements to continue');
+        return;
+      }
+
+      await signUp(email, password, username);
+      Alert.alert(
+        'Registration Successful',
+        'Please check your email to verify your account.',
+        [{ text: 'OK', onPress: () => router.replace('/auth/login') }]
+      );
+    } catch (error: any) {
+      setError(error.message);
     } finally {
       setLoading(false);
     }
@@ -77,53 +100,65 @@ export default function Register() {
               style={styles.closeButton}
               onPress={() => setLegalModalVisible(false)}
             >
-              <X size={24} color="#666" />
+              <StyledIcon name="X" size={24} color="#666" />
             </TouchableOpacity>
           </View>
 
-          <ScrollView style={styles.modalScroll}>
+          <ScrollView style={styles.modalBody}>
             <TouchableOpacity 
-              style={styles.modalLink}
+              style={styles.modalSection}
               onPress={() => {
                 setLegalModalVisible(false);
                 router.push('/legal/terms');
               }}
             >
-              <Text style={styles.modalLinkText}>Terms of Use</Text>
+              <View style={styles.modalSectionHeader}>
+                <Text style={styles.modalSectionTitle}>Terms of Service</Text>
+                <StyledIcon name="ChevronRight" size={20} color="#666" />
+              </View>
+              <Text style={styles.modalSectionDescription}>
+                Read our terms of service to understand the rules and guidelines for using our platform.
+              </Text>
             </TouchableOpacity>
 
             <TouchableOpacity 
-              style={styles.modalLink}
+              style={styles.modalSection}
               onPress={() => {
                 setLegalModalVisible(false);
                 router.push('/legal/privacy');
               }}
             >
-              <Text style={styles.modalLinkText}>Privacy Policy</Text>
+              <View style={styles.modalSectionHeader}>
+                <Text style={styles.modalSectionTitle}>Privacy Policy</Text>
+                <StyledIcon name="ChevronRight" size={20} color="#666" />
+              </View>
+              <Text style={styles.modalSectionDescription}>
+                Learn how we collect, use, and protect your personal information.
+              </Text>
             </TouchableOpacity>
 
             <TouchableOpacity 
-              style={styles.modalLink}
+              style={styles.modalSection}
               onPress={() => {
                 setLegalModalVisible(false);
                 router.push('/legal/disclaimer');
               }}
             >
-              <Text style={styles.modalLinkText}>Disclaimer</Text>
+              <View style={styles.modalSectionHeader}>
+                <Text style={styles.modalSectionTitle}>Disclaimer</Text>
+                <StyledIcon name="ChevronRight" size={20} color="#666" />
+              </View>
+              <Text style={styles.modalSectionDescription}>
+                Understand the limitations and disclaimers related to our services.
+              </Text>
             </TouchableOpacity>
-          </ScrollView>
 
-          <TouchableOpacity
-            style={[styles.modalButton, legalAgreement && styles.modalButtonActive]}
-            onPress={() => {
-              setLegalAgreement(!legalAgreement);
-              setLegalModalVisible(false);
-            }}
-          >
-            <Text style={[styles.modalButtonText, legalAgreement && styles.modalButtonTextActive]}>
-              {legalAgreement ? 'Agreements Accepted' : 'Accept All Agreements'}
+            <Text style={styles.modalNote}>
+              By checking the box, you confirm that you have read and agree to our Terms of Service, 
+              Privacy Policy, and Disclaimer. You acknowledge that your personal information will be 
+              processed as described in our Privacy Policy.
             </Text>
-          </TouchableOpacity>
+          </ScrollView>
         </TouchableOpacity>
       </TouchableOpacity>
     </Modal>
@@ -137,7 +172,7 @@ export default function Register() {
       <ScrollView style={styles.content}>
         <View style={styles.header}>
           <Image
-            source={{ uri: 'https://images.unsplash.com/photo-1497366216548-37526070297c?w=800' }}
+            source={{ uri: 'https://images.unsplash.com/photo-1517245386807-bb43f82c33c4?w=800' }}
             style={styles.headerImage}
           />
           <View style={styles.overlay} />
@@ -153,48 +188,62 @@ export default function Register() {
           )}
 
           <View style={styles.inputContainer}>
-            <Mail size={20} color="#666" style={styles.inputIcon} />
-            <TextInput
-              style={styles.input}
-              placeholder="Email"
-              value={email}
-              onChangeText={setEmail}
-              autoCapitalize="none"
-              keyboardType="email-address"
-            />
+            <View style={styles.inputWrapper}>
+              <StyledIcon name="User" size={20} color="#666" style={styles.inputIcon} />
+              <TextInput
+                style={styles.input}
+                placeholder="Username"
+                value={username}
+                onChangeText={setUsername}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+            </View>
           </View>
 
-          <View style={styles.inputContainer}>
-            <Lock size={20} color="#666" style={styles.inputIcon} />
-            <TextInput
-              style={styles.input}
-              placeholder="Password"
-              value={password}
-              onChangeText={setPassword}
-              secureTextEntry
-            />
+          <View style={[styles.inputContainer, styles.spacingTop]}>
+            <View style={styles.inputWrapper}>
+              <StyledIcon name="Mail" size={20} color="#666" style={styles.inputIcon} />
+              <TextInput
+                style={styles.input}
+                placeholder="Email"
+                value={email}
+                onChangeText={setEmail}
+                keyboardType="email-address"
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+            </View>
           </View>
 
-          <View style={styles.inputContainer}>
-            <Lock size={20} color="#666" style={styles.inputIcon} />
-            <TextInput
-              style={styles.input}
-              placeholder="Confirm Password"
-              value={confirmPassword}
-              onChangeText={setConfirmPassword}
-              secureTextEntry
-            />
+          <View style={[styles.inputContainer, styles.spacingTop]}>
+            <View style={styles.inputWrapper}>
+              <StyledIcon name="Lock" size={20} color="#666" style={styles.inputIcon} />
+              <TextInput
+                style={styles.input}
+                placeholder="Password"
+                value={password}
+                onChangeText={setPassword}
+                secureTextEntry
+              />
+            </View>
           </View>
 
           <TouchableOpacity 
-            style={styles.agreementRow}
-            onPress={() => setLegalModalVisible(true)}
+            style={styles.legalContainer}
+            onPress={() => setLegalAgreement(!legalAgreement)}
           >
             <View style={[styles.checkbox, legalAgreement && styles.checkboxChecked]}>
-              {legalAgreement && <Check size={16} color="white" />}
+              {legalAgreement && <StyledIcon name="Check" size={16} color="white" />}
             </View>
-            <Text style={styles.agreementLabel}>
-              I agree to the Terms of Use, Privacy Policy, and Disclaimer
+            <Text style={styles.legalText}>
+              I agree to the{' '}
+              <Text 
+                style={styles.legalLink}
+                onPress={() => setLegalModalVisible(true)}
+              >
+                Terms of Service and Privacy Policy
+              </Text>
             </Text>
           </TouchableOpacity>
 
@@ -214,7 +263,7 @@ export default function Register() {
             <Text style={styles.footerText}>Already have an account?</Text>
             <Link href="/auth/login" asChild>
               <TouchableOpacity>
-                <Text style={styles.footerLink}>Sign In</Text>
+                <Text style={styles.footerLink}>Login</Text>
               </TouchableOpacity>
             </Link>
           </View>
@@ -280,44 +329,52 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   inputContainer: {
+    width: '100%',
+  },
+  spacingTop: {
+    marginTop: 16,
+  },
+  inputWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#f5f5f5',
-    borderRadius: 12,
-    marginBottom: 16,
-    padding: 4,
+    borderRadius: 8,
+    paddingHorizontal: 12,
   },
   inputIcon: {
-    padding: 12,
+    padding: 8,
   },
   input: {
     flex: 1,
     paddingVertical: 12,
-    paddingRight: 12,
     fontSize: 16,
   },
-  agreementRow: {
+  legalContainer: {
     flexDirection: 'row',
     alignItems: 'center',
+    marginTop: 24,
     marginBottom: 24,
+    gap: 12,
   },
   checkbox: {
     width: 24,
     height: 24,
-    borderRadius: 6,
+    borderRadius: 4,
     borderWidth: 2,
     borderColor: '#007AFF',
-    marginRight: 12,
-    justifyContent: 'center',
     alignItems: 'center',
+    justifyContent: 'center',
   },
   checkboxChecked: {
     backgroundColor: '#007AFF',
   },
-  agreementLabel: {
+  legalText: {
     flex: 1,
     fontSize: 14,
-    color: '#333',
+    color: '#666',
+  },
+  legalLink: {
+    color: '#007AFF',
   },
   button: {
     backgroundColor: '#007AFF',
@@ -377,33 +434,36 @@ const styles = StyleSheet.create({
   closeButton: {
     padding: 8,
   },
-  modalScroll: {
+  modalBody: {
     marginBottom: 20,
   },
-  modalLink: {
-    paddingVertical: 16,
+  modalSection: {
     borderBottomWidth: 1,
     borderBottomColor: '#f0f0f0',
+    paddingVertical: 16,
   },
-  modalLinkText: {
-    fontSize: 16,
+  modalSectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  modalSectionTitle: {
+    fontSize: 18,
+    fontWeight: '600',
     color: '#007AFF',
   },
-  modalButton: {
-    backgroundColor: '#f5f5f5',
-    padding: 16,
-    borderRadius: 12,
-    alignItems: 'center',
-  },
-  modalButtonActive: {
-    backgroundColor: '#007AFF',
-  },
-  modalButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
+  modalSectionDescription: {
+    fontSize: 14,
     color: '#666',
+    lineHeight: 20,
   },
-  modalButtonTextActive: {
-    color: 'white',
+  modalNote: {
+    fontSize: 14,
+    color: '#666',
+    lineHeight: 20,
+    marginTop: 24,
+    marginBottom: 16,
+    fontStyle: 'italic',
   },
 });

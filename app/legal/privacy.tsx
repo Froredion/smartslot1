@@ -71,7 +71,7 @@ export default function Privacy() {
             If you have any questions about this Privacy Policy, you may contact us at:
           </Text>
           <Text style={styles.contact}>Email: ericksontalaue@gmail.com</Text>
-          <Text style={styles.contact}>Company: SmartSlot</Text>
+          <Text style={styles.contact}>Company: SmartFolio</Text>
         </View>
       </ScrollView>
     </>

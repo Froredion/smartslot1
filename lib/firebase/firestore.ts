@@ -12,13 +12,21 @@ import {
   arrayUnion,
   arrayRemove,
   getDoc,
+  setDoc,
 } from 'firebase/firestore';
 import { db } from './config';
 
 export interface UserProfile {
   id: string;
   email: string;
+  username: string;
   organizationIds: string[];
+  pendingInvites: Array<{
+    organizationId: string;
+    organizationName: string;
+    invitedBy: string;
+    invitedAt: Date;
+  }>;
   isOwner: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -95,6 +103,25 @@ export interface ActivityLog {
   };
 }
 
+export interface UserPermissions {
+  analytics: {
+    viewEarnings: boolean;
+    viewUnpaidAmount: boolean;
+    viewAgentPayments: boolean;
+  };
+  bookings: {
+    create: boolean;
+    createForOthers: boolean;
+    edit: boolean;
+    editOthers: boolean;
+    delete: boolean;
+    deleteOthers: boolean;
+  };
+  users: {
+    manage: boolean;
+  };
+}
+
 export const createOrganization = async (name: string, ownerId: string) => {
   try {
     // Create the organization
@@ -135,10 +162,34 @@ export const updateOrganization = async (orgId: string, updates: Partial<Organiz
   }
 };
 
-export const addUserToOrganization = async (orgId: string, userId: string) => {
+export const addUserToOrganization = async (orgId: string, email: string) => {
   try {
-    // Add user to organization
+    // First, find the user by email
+    const usersRef = collection(db, 'users');
+    const q = query(usersRef, where('email', '==', email));
+    const querySnapshot = await getDocs(q);
+    
+    if (querySnapshot.empty) {
+      throw new Error('User not found with this email address');
+    }
+    
+    const userDoc = querySnapshot.docs[0];
+    const userId = userDoc.id;
+    
+    // Check if user is already a member
     const orgRef = doc(db, 'organizations', orgId);
+    const orgDoc = await getDoc(orgRef);
+    
+    if (!orgDoc.exists()) {
+      throw new Error('Organization not found');
+    }
+    
+    const orgData = orgDoc.data();
+    if (orgData.members && orgData.members.includes(userId)) {
+      throw new Error('User is already a member of this organization');
+    }
+    
+    // Add user to organization
     await updateDoc(orgRef, {
       members: arrayUnion(userId),
       updatedAt: serverTimestamp(),
@@ -150,6 +201,8 @@ export const addUserToOrganization = async (orgId: string, userId: string) => {
       organizationIds: arrayUnion(orgId),
       updatedAt: serverTimestamp(),
     });
+    
+    return userId;
   } catch (error) {
     console.error('Error adding user to organization:', error);
     throw error;
@@ -407,4 +460,201 @@ export const removeCategory = async (organizationId: string, category: string) =
     categories: arrayRemove(category),
     updatedAt: serverTimestamp(),
   });
+};
+
+export const subscribeToOrganizationUsers = (
+  organizationId: string,
+  callback: (users: Array<{ id: string; email: string; isOwner?: boolean }>) => void
+) => {
+  const orgRef = doc(db, 'organizations', organizationId);
+  
+  const unsubscribe = onSnapshot(orgRef, async (orgDoc) => {
+    if (!orgDoc.exists()) {
+      callback([]);
+      return;
+    }
+
+    const orgData = orgDoc.data();
+    const users = await Promise.all(
+      orgData.members.map(async (userId: string) => {
+        const userDoc = await getDoc(doc(db, 'users', userId));
+        return {
+          id: userId,
+          email: userDoc.data()?.email || '',
+          isOwner: userId === orgData.ownerId,
+        };
+      })
+    );
+
+    callback(users);
+  });
+
+  return unsubscribe;
+};
+
+export const subscribeToUserPermissions = (
+  organizationId: string,
+  userId: string,
+  callback: (permissions: UserPermissions) => void
+) => {
+  const permissionsRef = doc(db, 'organizations', organizationId, 'user_permissions', userId);
+  
+  const unsubscribe = onSnapshot(permissionsRef, (doc) => {
+    if (!doc.exists()) {
+      // Return default permissions if none set
+      callback({
+        analytics: {
+          viewEarnings: false,
+          viewUnpaidAmount: false,
+          viewAgentPayments: false,
+        },
+        bookings: {
+          create: true,
+          createForOthers: false,
+          edit: true,
+          editOthers: false,
+          delete: true,
+          deleteOthers: false,
+        },
+        users: {
+          manage: false,
+        },
+      });
+      return;
+    }
+
+    callback(doc.data() as UserPermissions);
+  });
+
+  return unsubscribe;
+};
+
+export const updateUserPermissions = async (
+  organizationId: string,
+  userId: string,
+  permissions: UserPermissions
+) => {
+  const permissionsRef = doc(db, 'organizations', organizationId, 'user_permissions', userId);
+  await setDoc(permissionsRef, permissions);
+};
+
+export const checkUsernameAvailability = async (username: string): Promise<boolean> => {
+  try {
+    const usersRef = collection(db, 'users');
+    const q = query(usersRef, where('username', '==', username));
+    const querySnapshot = await getDocs(q);
+    return querySnapshot.empty;
+  } catch (error) {
+    console.error('Error checking username availability:', error);
+    throw error;
+  }
+};
+
+export const inviteUserToOrganization = async (
+  organizationId: string, 
+  inviteInput: string,  // Can be either username or email
+  invitedBy: string
+) => {
+  try {
+    const orgRef = doc(db, 'organizations', organizationId);
+    const orgDoc = await getDoc(orgRef);
+    
+    if (!orgDoc.exists()) {
+      throw new Error('Organization not found');
+    }
+
+    const orgData = orgDoc.data();
+    
+    // Try to find user by username first
+    const usersByUsername = await getDocs(
+      query(collection(db, 'users'), where('username', '==', inviteInput))
+    );
+
+    // If not found by username, try email
+    const usersByEmail = !usersByUsername.empty ? 
+      { empty: true, docs: [] } : 
+      await getDocs(query(collection(db, 'users'), where('email', '==', inviteInput)));
+
+    // User exists
+    if (!usersByUsername.empty || !usersByEmail.empty) {
+      const userDoc = usersByUsername.empty ? usersByEmail.docs[0] : usersByUsername.docs[0];
+      const userId = userDoc.id;
+      
+      // Check if already a member
+      if (orgData.members && orgData.members.includes(userId)) {
+        throw new Error('User is already a member of this organization');
+      }
+
+      // Add user to organization
+      await updateDoc(orgRef, {
+        members: arrayUnion(userId),
+        updatedAt: serverTimestamp(),
+      });
+
+      // Add organization to user's list
+      await updateDoc(doc(db, 'users', userId), {
+        organizationIds: arrayUnion(organizationId),
+        updatedAt: serverTimestamp(),
+      });
+
+      return { status: 'added', userId };
+    } 
+    // User doesn't exist, send invitation by email
+    else if (inviteInput.includes('@')) {
+      // Create pending invite
+      const inviteData = {
+        email: inviteInput,
+        organizationId,
+        organizationName: orgData.name,
+        invitedBy,
+        invitedAt: serverTimestamp(),
+      };
+
+      await addDoc(collection(db, 'pending_invites'), inviteData);
+      
+      // Here you would typically send an email invitation
+      // You'll need to implement email sending functionality
+      
+      return { status: 'invited', email: inviteInput };
+    } else {
+      throw new Error('User not found and input is not a valid email address');
+    }
+  } catch (error) {
+    console.error('Error inviting user to organization:', error);
+    throw error;
+  }
+};
+
+export const quitOrganization = async (organizationId: string, userId: string) => {
+  try {
+    const orgRef = doc(db, 'organizations', organizationId);
+    const orgDoc = await getDoc(orgRef);
+    
+    if (!orgDoc.exists()) {
+      throw new Error('Organization not found');
+    }
+
+    const orgData = orgDoc.data();
+    if (orgData.ownerId === userId) {
+      throw new Error('Organization owner cannot quit. Transfer ownership first or delete the organization.');
+    }
+
+    // Remove user from organization
+    await updateDoc(orgRef, {
+      members: arrayRemove(userId),
+      updatedAt: serverTimestamp(),
+    });
+
+    // Remove organization from user's list
+    const userRef = doc(db, 'users', userId);
+    await updateDoc(userRef, {
+      organizationIds: arrayRemove(organizationId),
+      updatedAt: serverTimestamp(),
+    });
+
+    return true;
+  } catch (error) {
+    console.error('Error quitting organization:', error);
+    throw error;
+  }
 };

@@ -13,6 +13,8 @@ import {
 import { Link, router } from 'expo-router';
 import { Mail, ArrowLeft, Send } from 'lucide-react-native';
 import { resetPassword } from '@/lib/firebase/auth';
+import { validateEmail } from '@/lib/validation';
+import { StyledIcon } from '@/components/StyledIcon';
 
 export default function ResetPassword() {
   const [email, setEmail] = useState('');
@@ -26,9 +28,13 @@ export default function ResetPassword() {
       return;
     }
 
+    if (!validateEmail(email)) {
+      setError('Please enter a valid email address');
+      return;
+    }
+
     setLoading(true);
     setError(null);
-    setSuccess(false);
 
     try {
       await resetPassword(email);
@@ -58,58 +64,61 @@ export default function ResetPassword() {
           </Text>
         </View>
 
-        <View style={styles.form}>
-          {error && (
-            <View style={styles.errorContainer}>
-              <Text style={styles.errorText}>{error}</Text>
-            </View>
-          )}
+        {error && <Text style={styles.error}>{error}</Text>}
 
-          {success && (
-            <View style={styles.successContainer}>
-              <Text style={styles.successText}>
-                Password reset email sent! Check your inbox for instructions.
-              </Text>
-            </View>
-          )}
-
-          <View style={styles.inputContainer}>
-            <Mail size={20} color="#666" style={styles.inputIcon} />
-            <TextInput
-              style={styles.input}
-              placeholder="Email"
-              value={email}
-              onChangeText={setEmail}
-              autoCapitalize="none"
-              keyboardType="email-address"
-              editable={!success}
-            />
+        {success ? (
+          <View style={styles.successContainer}>
+            <Text style={styles.successTitle}>Check Your Email</Text>
+            <Text style={styles.successText}>
+              We've sent password reset instructions to your email address.
+            </Text>
+            <TouchableOpacity
+              style={styles.button}
+              onPress={() => router.replace('/auth/login')}
+            >
+              <Text style={styles.buttonText}>Return to Login</Text>
+            </TouchableOpacity>
           </View>
+        ) : (
+          <View style={styles.form}>
+            <View style={styles.inputContainer}>
+              <View style={styles.inputWrapper}>
+                <StyledIcon name="Mail" size={20} color="#666" style={styles.inputIcon} />
+                <TextInput
+                  style={styles.input}
+                  value={email}
+                  onChangeText={setEmail}
+                  placeholder="Email"
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                />
+              </View>
+            </View>
 
-          <TouchableOpacity
-            style={[styles.button, success && styles.disabledButton]}
-            onPress={handleResetPassword}
-            disabled={loading || success}
-          >
-            {loading ? (
-              <ActivityIndicator color="white" />
-            ) : (
-              <>
-                <Text style={styles.buttonText}>
-                  {success ? 'Email Sent' : 'Reset Password'}
-                </Text>
-                <Send size={20} color="white" />
-              </>
-            )}
-          </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.button, loading && styles.disabledButton]}
+              onPress={handleResetPassword}
+              disabled={loading}
+            >
+              {loading ? (
+                <ActivityIndicator color="white" />
+              ) : (
+                <>
+                  <Text style={styles.buttonText}>Send Reset Link</Text>
+                  <StyledIcon name="Send" size={20} color="white" />
+                </>
+              )}
+            </TouchableOpacity>
 
-          <Link href="/auth/login" asChild>
-            <TouchableOpacity style={styles.backButton}>
-              <ArrowLeft size={20} color="#007AFF" />
+            <TouchableOpacity
+              style={styles.backButton}
+              onPress={() => router.back()}
+            >
+              <StyledIcon name="ArrowLeft" size={20} color="#007AFF" />
               <Text style={styles.backButtonText}>Back to Login</Text>
             </TouchableOpacity>
-          </Link>
-        </View>
+          </View>
+        )}
       </View>
     </KeyboardAvoidingView>
   );
@@ -187,6 +196,13 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     padding: 4,
   },
+  inputWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f5f5f5',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+  },
   inputIcon: {
     padding: 12,
   },
@@ -225,5 +241,15 @@ const styles = StyleSheet.create({
     color: '#007AFF',
     fontSize: 16,
     fontWeight: '600',
+  },
+  error: {
+    color: 'red',
+    marginBottom: 15,
+    textAlign: 'center',
+  },
+  successTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#34C759',
   },
 });
