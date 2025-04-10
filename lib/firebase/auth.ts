@@ -1,31 +1,56 @@
-import { 
+import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   signOut as firebaseSignOut,
   onAuthStateChanged,
   sendPasswordResetEmail,
   sendEmailVerification,
-  User
+  User,
 } from 'firebase/auth';
 import { auth } from './config';
-import { createUserProfile, getUserProfile } from './firestore';
+import {
+  doc,
+  setDoc,
+  getDoc,
+  collection,
+  addDoc,
+  serverTimestamp,
+} from 'firebase/firestore';
+import { db } from './config';
 
 export const signUp = async (email: string, password: string) => {
   try {
-    const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-    
+    const userCredential = await createUserWithEmailAndPassword(
+      auth,
+      email,
+      password
+    );
+
     try {
+      // Create default organization first
+      const orgRef = await addDoc(collection(db, 'organizations'), {
+        name: 'My Organization',
+        ownerId: userCredential.user.uid,
+        members: [userCredential.user.uid],
+        currency: 'USD',
+        categories: ['Vehicle', 'Property', 'Equipment'],
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+
       // Create user profile in Firestore
-      await createUserProfile(userCredential.user.uid, {
+      await setDoc(doc(db, 'users', userCredential.user.uid), {
         email: userCredential.user.email || '',
         displayName: '',
-        createdAt: new Date(),
-        updatedAt: new Date(),
+        organizationIds: [orgRef.id], // Store organization IDs array
+        isOwner: true, // First user is always owner of their org
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
         preferences: {
           notifications: true,
           theme: 'light',
-          currency: 'USD'
-        }
+          currency: 'USD',
+        },
       });
     } catch (profileError) {
       console.error('Error creating user profile:', profileError);
@@ -61,22 +86,42 @@ export const signUp = async (email: string, password: string) => {
 
 export const signIn = async (email: string, password: string) => {
   try {
-    const userCredential = await signInWithEmailAndPassword(auth, email, password);
-    
+    const userCredential = await signInWithEmailAndPassword(
+      auth,
+      email,
+      password
+    );
+
     try {
-      // Check if user profile exists, if not create it
-      const profile = await getUserProfile(userCredential.user.uid);
-      if (!profile) {
-        await createUserProfile(userCredential.user.uid, {
+      // Check if user profile exists
+      const userRef = doc(db, 'users', userCredential.user.uid);
+      const userDoc = await getDoc(userRef);
+
+      if (!userDoc.exists()) {
+        // Create default organization if user doesn't have a profile
+        const orgRef = await addDoc(collection(db, 'organizations'), {
+          name: 'My Organization',
+          ownerId: userCredential.user.uid,
+          members: [userCredential.user.uid],
+          currency: 'USD',
+          categories: ['Default'],
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+
+        // Create user profile
+        await setDoc(userRef, {
           email: userCredential.user.email || '',
           displayName: '',
-          createdAt: new Date(),
-          updatedAt: new Date(),
+          organizationIds: [orgRef.id], // Store organization IDs array
+          isOwner: true, // First user is always owner of their org
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
           preferences: {
             notifications: true,
             theme: 'light',
-            currency: 'USD'
-          }
+            currency: 'USD',
+          },
         });
       }
     } catch (profileError) {
@@ -88,7 +133,10 @@ export const signIn = async (email: string, password: string) => {
   } catch (error: any) {
     console.error('Login error:', error);
     let message = 'Invalid email or password';
-    if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password') {
+    if (
+      error.code === 'auth/user-not-found' ||
+      error.code === 'auth/wrong-password'
+    ) {
       message = 'Invalid email or password';
     } else if (error.code === 'auth/invalid-email') {
       message = 'Invalid email address';
@@ -140,6 +188,8 @@ export const signOut = async () => {
   }
 };
 
-export const subscribeToAuthChanges = (callback: (user: User | null) => void) => {
+export const subscribeToAuthChanges = (
+  callback: (user: User | null) => void
+) => {
   return onAuthStateChanged(auth, callback);
 };

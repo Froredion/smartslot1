@@ -1,47 +1,45 @@
 import { 
-  collection,
-  doc,
-  getDocs,
-  getDoc,
-  setDoc,
+  collection, 
+  doc, 
+  onSnapshot, 
+  query, 
+  where,
+  addDoc,
   updateDoc,
   deleteDoc,
-  query,
-  where,
-  Timestamp,
-  onSnapshot,
   serverTimestamp,
+  getDocs,
   arrayUnion,
   arrayRemove,
-  writeBatch
+  getDoc,
 } from 'firebase/firestore';
-import { db, auth } from './config';
+import { db } from './config';
 
-// User Profile Types
 export interface UserProfile {
   id: string;
   email: string;
-  displayName?: string;
-  phoneNumber?: string;
-  company?: string;
-  role?: string;
-  createdAt: any;
-  updatedAt: any;
-  preferences?: {
+  organizationIds: string[];
+  isOwner: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+  preferences: {
     notifications: boolean;
     theme: 'light' | 'dark';
     currency: string;
   };
+}
+
+export interface Organization {
+  id: string;
+  name: string;
+  ownerId: string;
+  members: string[];
+  currency: string;
   categories: string[];
+  createdAt: Date;
+  updatedAt: Date;
 }
 
-// Time Slot Types
-export interface TimeSlot {
-  start: string; // 24-hour format "HH:mm"
-  end: string; // 24-hour format "HH:mm"
-}
-
-// Asset Types
 export interface Asset {
   id: string;
   name: string;
@@ -49,392 +47,364 @@ export interface Asset {
   description?: string;
   status: 'Available' | 'Unavailable';
   pricePerDay: number;
+  agentFee: number;
   currency: string;
-  createdAt: Timestamp;
-  updatedAt: Timestamp;
   bookingType: 'full-day' | 'time-slots';
   timeSlots?: TimeSlot[];
   maxBookingsPerDay?: number;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface TimeSlot {
+  start: string;
+  end: string;
 }
 
 export interface Booking {
   id: string;
   assetId: string;
   date: Date;
-  timeSlot?: TimeSlot;
   description?: string;
   bookedBy: string;
   clientName?: string;
   numberOfPeople?: number;
   customPrice?: number;
+  customAgentFee?: number;
   currency: string;
-  createdAt: Timestamp;
-  status: 'Pending' | 'Confirmed' | 'Cancelled';
+  timeSlot?: TimeSlot;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
-const DEFAULT_CATEGORIES = [
-  'Vehicle',
-  'Room',
-  'Property',
-  'Equipment',
-  'Electronics',
-  'Furniture',
-  'Tools',
-  'Office',
-  'Storage',
-  'Outdoor'
-];
+export interface Analytics {
+  totalEarned: number;
+  unpaidAmount: number;
+  agentPayments: number;
+  currency: string;
+}
 
-// User Profile Operations
-export const createUserProfile = async (userId: string, data: Partial<UserProfile>) => {
-  if (!auth.currentUser) throw new Error('User not authenticated');
-  
-  const batch = writeBatch(db);
-  
-  // Create user profile
-  const userRef = doc(db, 'users', userId);
-  const profileData = {
-    ...data,
-    id: userId,
-    email: auth.currentUser.email,
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-    categories: DEFAULT_CATEGORIES,
-    preferences: {
-      notifications: true,
-      theme: 'light',
-      currency: 'USD',
-      ...data.preferences
-    }
+export interface ActivityLog {
+  id: string;
+  userEmail: string;
+  action: string;
+  resourceType: string;
+  details: string;
+  timestamp: {
+    toDate: () => Date;
   };
-  
-  batch.set(userRef, profileData);
+}
 
-  // Create bookings subcollection
-  const bookingsRef = collection(userRef, 'bookings');
-  const initialBookingRef = doc(bookingsRef);
-  batch.set(initialBookingRef, {
-    createdAt: serverTimestamp(),
-    initialized: true
-  });
-
-  // Create assets subcollection
-  const assetsRef = collection(userRef, 'assets');
-  const initialAssetRef = doc(assetsRef);
-  batch.set(initialAssetRef, {
-    createdAt: serverTimestamp(),
-    initialized: true
-  });
-
-  await batch.commit();
-  return { id: userId, ...profileData };
-};
-
-export const getUserProfile = async (userId: string) => {
+export const createOrganization = async (name: string, ownerId: string) => {
   try {
-    const docRef = doc(db, 'users', userId);
-    const docSnap = await getDoc(docRef);
-    if (docSnap.exists()) {
-      return { id: docSnap.id, ...docSnap.data() } as UserProfile;
-    }
-    return null;
+    // Create the organization
+    const orgRef = await addDoc(collection(db, 'organizations'), {
+      name,
+      ownerId,
+      members: [ownerId],
+      currency: 'USD',
+      categories: ['Default'],
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+
+    // Update user's organizations
+    const userRef = doc(db, 'users', ownerId);
+    await updateDoc(userRef, {
+      organizationIds: arrayUnion(orgRef.id),
+      updatedAt: serverTimestamp(),
+    });
+
+    return orgRef.id;
   } catch (error) {
-    console.error('Error getting user profile:', error);
+    console.error('Error creating organization:', error);
     throw error;
   }
 };
 
-export const updateUserProfile = async (userId: string, data: Partial<UserProfile>) => {
-  const userRef = doc(db, 'users', userId);
-  const updateData = {
-    ...data,
-    updatedAt: serverTimestamp()
-  };
-  await updateDoc(userRef, updateData);
+export const updateOrganization = async (orgId: string, updates: Partial<Organization>) => {
+  try {
+    const orgRef = doc(db, 'organizations', orgId);
+    await updateDoc(orgRef, {
+      ...updates,
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    console.error('Error updating organization:', error);
+    throw error;
+  }
 };
 
-export const addCategory = async (userId: string, category: string) => {
-  const userRef = doc(db, 'users', userId);
-  await updateDoc(userRef, {
-    categories: arrayUnion(category),
-    updatedAt: serverTimestamp()
-  });
+export const addUserToOrganization = async (orgId: string, userId: string) => {
+  try {
+    // Add user to organization
+    const orgRef = doc(db, 'organizations', orgId);
+    await updateDoc(orgRef, {
+      members: arrayUnion(userId),
+      updatedAt: serverTimestamp(),
+    });
+
+    // Add organization to user's list
+    const userRef = doc(db, 'users', userId);
+    await updateDoc(userRef, {
+      organizationIds: arrayUnion(orgId),
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    console.error('Error adding user to organization:', error);
+    throw error;
+  }
 };
 
-export const removeCategory = async (userId: string, category: string) => {
-  const userRef = doc(db, 'users', userId);
-  await updateDoc(userRef, {
-    categories: arrayRemove(category),
-    updatedAt: serverTimestamp()
-  });
+export const removeUserFromOrganization = async (orgId: string, userId: string) => {
+  try {
+    const orgRef = doc(db, 'organizations', orgId);
+    const orgDoc = await getDoc(orgRef);
+    
+    if (!orgDoc.exists()) {
+      throw new Error('Organization not found');
+    }
+
+    const orgData = orgDoc.data();
+    if (orgData.ownerId === userId) {
+      throw new Error('Cannot remove organization owner');
+    }
+
+    // Remove user from organization
+    await updateDoc(orgRef, {
+      members: arrayRemove(userId),
+      updatedAt: serverTimestamp(),
+    });
+
+    // Remove organization from user's list
+    const userRef = doc(db, 'users', userId);
+    await updateDoc(userRef, {
+      organizationIds: arrayRemove(orgId),
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    console.error('Error removing user from organization:', error);
+    throw error;
+  }
 };
 
 export const subscribeToUserProfile = (userId: string, callback: (profile: UserProfile | null) => void) => {
-  return onSnapshot(doc(db, 'users', userId), (doc) => {
-    if (doc.exists()) {
-      callback({ id: doc.id, ...doc.data() } as UserProfile);
-    } else {
+  const unsubscribe = onSnapshot(
+    doc(db, 'users', userId),
+    (doc) => {
+      if (doc.exists()) {
+        callback({
+          id: doc.id,
+          ...doc.data(),
+          createdAt: doc.data().createdAt?.toDate() || new Date(),
+          updatedAt: doc.data().updatedAt?.toDate() || new Date(),
+        } as UserProfile);
+      } else {
+        callback(null);
+      }
+    },
+    (error) => {
+      console.error('Error fetching user profile:', error);
       callback(null);
     }
-  });
+  );
+
+  return unsubscribe;
 };
 
-// Asset Operations
-export const subscribeToAssets = (callback: (assets: Asset[]) => void) => {
-  if (!auth.currentUser) {
-    callback([]);
-    return () => {};
-  }
+export const subscribeToOrganizations = (userId: string, callback: (orgs: Organization[]) => void) => {
+  const orgsQuery = query(
+    collection(db, 'organizations'),
+    where('members', 'array-contains', userId)
+  );
 
-  const assetsRef = collection(db, 'users', auth.currentUser.uid, 'assets');
-  
-  return onSnapshot(assetsRef, (snapshot) => {
-    const assets = snapshot.docs
-      .filter(doc => !doc.data().initialized) // Filter out initialization document
-      .map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as Asset[];
-    callback(assets);
-  });
-};
-
-export const createAsset = async (asset: Omit<Asset, 'id' | 'createdAt' | 'updatedAt'>) => {
-  if (!auth.currentUser) throw new Error('User not authenticated');
-
-  const assetsRef = collection(db, 'users', auth.currentUser.uid, 'assets');
-  const docRef = doc(assetsRef);
-  
-  // Clean up the asset data by removing undefined values
-  const cleanAsset = Object.entries(asset).reduce((acc, [key, value]) => {
-    // Only include defined values, convert empty strings to null
-    if (value !== undefined) {
-      acc[key] = value === '' ? null : value;
-    }
-    return acc;
-  }, {} as Record<string, any>);
-
-  const assetData = {
-    id: docRef.id,
-    ...cleanAsset,
-    // Ensure required fields have default values
-    description: cleanAsset.description || null,
-    timeSlots: cleanAsset.timeSlots || [],
-    maxBookingsPerDay: cleanAsset.maxBookingsPerDay || null,
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp()
-  };
-
-  try {
-    await setDoc(docRef, assetData);
-    return docRef.id;
-  } catch (error: any) {
-    console.error('Error creating asset:', error);
-    throw new Error('Failed to create asset. Please try again.');
-  }
-};
-
-export const updateAsset = async (assetId: string, asset: Partial<Asset>) => {
-  if (!auth.currentUser) throw new Error('User not authenticated');
-
-  const assetRef = doc(db, 'users', auth.currentUser.uid, 'assets', assetId);
-  
-  // Clean up the update data by removing undefined values
-  const cleanUpdate = Object.entries(asset).reduce((acc, [key, value]) => {
-    // Only include defined values, convert empty strings to null
-    if (value !== undefined) {
-      acc[key] = value === '' ? null : value;
-    }
-    return acc;
-  }, {} as Record<string, any>);
-
-  const updateData = {
-    ...cleanUpdate,
-    updatedAt: serverTimestamp()
-  };
-
-  try {
-    await updateDoc(assetRef, updateData);
-  } catch (error: any) {
-    console.error('Error updating asset:', error);
-    throw new Error('Failed to update asset. Please try again.');
-  }
-};
-
-export const deleteAsset = async (assetId: string) => {
-  console.log('Firestore - Starting asset deletion:', assetId);
-  
-  if (!auth.currentUser) {
-    console.error('Firestore - Cannot delete: No authenticated user');
-    throw new Error('You must be logged in to delete assets');
-  }
-
-  const assetRef = doc(db, 'users', auth.currentUser.uid, 'assets', assetId);
-  
-  try {
-    // First check if the asset exists and belongs to the user
-    const assetDoc = await getDoc(assetRef);
-    if (!assetDoc.exists()) {
-      console.error('Firestore - Asset not found:', assetId);
-      throw new Error('Asset not found');
-    }
-
-    console.log('Firestore - Deleting asset document:', assetId);
-    await deleteDoc(assetRef);
-    console.log('Firestore - Asset deleted successfully:', assetId);
-  } catch (error: any) {
-    console.error('Firestore - Error deleting asset:', error);
-    if (error.code === 'permission-denied') {
-      throw new Error('You do not have permission to delete this asset');
-    }
-    throw new Error('Failed to delete asset. Please try again.');
-  }
-};
-
-// Booking Operations
-export const subscribeToBookings = (callback: (bookings: Booking[]) => void) => {
-  if (!auth.currentUser) {
-    callback([]);
-    return () => {};
-  }
-
-  const bookingsRef = collection(db, 'users', auth.currentUser.uid, 'bookings');
-  
-  return onSnapshot(bookingsRef, (snapshot) => {
-    const bookings = snapshot.docs
-      .filter(doc => !doc.data().initialized) // Filter out initialization document
-      .map(doc => ({
+  const unsubscribe = onSnapshot(
+    orgsQuery,
+    (snapshot) => {
+      const orgs = snapshot.docs.map((doc) => ({
         id: doc.id,
         ...doc.data(),
-        date: doc.data().date instanceof Timestamp ? doc.data().date.toDate() : doc.data().date,
-      })) as Booking[];
-    callback(bookings);
-  });
+        createdAt: doc.data().createdAt?.toDate() || new Date(),
+        updatedAt: doc.data().updatedAt?.toDate() || new Date(),
+      } as Organization));
+      callback(orgs);
+    },
+    (error) => {
+      console.error('Error fetching organizations:', error);
+      callback([]);
+    }
+  );
+
+  return unsubscribe;
 };
 
-export const createBooking = async (booking: Omit<Booking, 'id' | 'createdAt' | 'status' | 'bookedBy'>) => {
-  if (!auth.currentUser) throw new Error('User not authenticated');
+export const subscribeToAssets = (organizationId: string, callback: (assets: Asset[]) => void) => {
+  const assetsRef = collection(db, 'organizations', organizationId, 'assets');
 
-  const bookingsRef = collection(db, 'users', auth.currentUser.uid, 'bookings');
-  const docRef = doc(bookingsRef);
-  
-  // Clean up the booking data by removing undefined values
-  const cleanBooking = Object.entries(booking).reduce((acc, [key, value]) => {
-    // Only include defined values, convert empty strings to null
-    if (value !== undefined) {
-      acc[key] = value === '' ? null : value;
+  const unsubscribe = onSnapshot(
+    assetsRef,
+    (snapshot) => {
+      const assets = snapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+        createdAt: doc.data().createdAt?.toDate() || new Date(),
+        updatedAt: doc.data().updatedAt?.toDate() || new Date(),
+      } as Asset));
+      callback(assets);
+    },
+    (error) => {
+      console.error('Error fetching assets:', error);
+      callback([]);
     }
-    return acc;
-  }, {} as Record<string, any>);
+  );
 
-  const bookingData = {
-    id: docRef.id,
-    ...cleanBooking,
-    date: Timestamp.fromDate(booking.date),
-    status: 'Confirmed' as const,
+  return unsubscribe;
+};
+
+export const createAsset = async (
+  organizationId: string,
+  asset: Omit<Asset, 'id' | 'createdAt' | 'updatedAt'>
+) => {
+  const assetsRef = collection(db, 'organizations', organizationId, 'assets');
+
+  const finalAsset = {
+    ...asset,
+    maxBookingsPerDay:
+      asset.bookingType === 'full-day'
+        ? 1
+        : asset.maxBookingsPerDay ?? 1,
     createdAt: serverTimestamp(),
-    bookedBy: auth.currentUser.email,
+    updatedAt: serverTimestamp(),
   };
 
-  try {
-    await setDoc(docRef, bookingData);
-    return docRef.id;
-  } catch (error: any) {
-    console.error('Error creating booking:', error);
-    throw new Error('Failed to create booking. Please try again.');
-  }
+  const docRef = await addDoc(assetsRef, finalAsset);
+  return docRef.id;
 };
 
-export const updateBooking = async (bookingId: string, booking: Partial<Booking>) => {
-  if (!auth.currentUser) throw new Error('User not authenticated');
+export const updateAsset = async (
+  organizationId: string,
+  assetId: string,
+  asset: Partial<Asset>
+) => {
+  const assetRef = doc(db, 'organizations', organizationId, 'assets', assetId);
 
-  const bookingRef = doc(db, 'users', auth.currentUser.uid, 'bookings', bookingId);
-  
-  // Clean up the update data by removing undefined values
-  const cleanUpdate = Object.entries(booking).reduce((acc, [key, value]) => {
-    // Only include defined values, convert empty strings to null
-    if (value !== undefined) {
-      acc[key] = value === '' ? null : value;
+  const updatedAsset: Partial<Asset> = {
+    ...asset,
+    maxBookingsPerDay:
+      asset.bookingType === 'full-day'
+        ? 1
+        : asset.maxBookingsPerDay ?? undefined,
+    updatedAt: serverTimestamp(),
+  };
+
+  await updateDoc(assetRef, updatedAsset);
+};
+
+export const deleteAsset = async (organizationId: string, assetId: string) => {
+  const assetRef = doc(db, 'organizations', organizationId, 'assets', assetId);
+  await deleteDoc(assetRef);
+};
+
+export const subscribeToBookings = (organizationId: string, callback: (bookings: Booking[]) => void) => {
+  const bookingsRef = collection(db, 'organizations', organizationId, 'bookings');
+
+  const unsubscribe = onSnapshot(
+    bookingsRef,
+    (snapshot) => {
+      const bookings = snapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+        date: doc.data().date?.toDate() || new Date(),
+        createdAt: doc.data().createdAt?.toDate() || new Date(),
+        updatedAt: doc.data().updatedAt?.toDate() || new Date(),
+      } as Booking));
+      callback(bookings);
+    },
+    (error) => {
+      console.error('Error fetching bookings:', error);
+      callback([]);
     }
-    return acc;
-  }, {} as Record<string, any>);
-
-  const updateData = {
-    ...cleanUpdate,
-    ...(booking.date && { date: Timestamp.fromDate(booking.date) }),
-    updatedAt: serverTimestamp()
-  };
-
-  try {
-    await updateDoc(bookingRef, updateData);
-  } catch (error: any) {
-    console.error('Error updating booking:', error);
-    throw new Error('Failed to update booking. Please try again.');
-  }
-};
-
-export const deleteBooking = async (bookingId: string) => {
-  if (!auth.currentUser) throw new Error('User not authenticated');
-
-  const bookingRef = doc(db, 'users', auth.currentUser.uid, 'bookings', bookingId);
-  
-  try {
-    await deleteDoc(bookingRef);
-  } catch (error: any) {
-    console.error('Error deleting booking:', error);
-    throw new Error('Failed to delete booking. Please try again.');
-  }
-};
-
-// Time Slot Validation
-export const isTimeSlotAvailable = (
-  asset: Asset,
-  date: Date,
-  timeSlot: TimeSlot,
-  existingBookings: Booking[]
-): boolean => {
-  if (asset.bookingType === 'full-day') {
-    return !existingBookings.some(booking => 
-      isSameDay(booking.date, date) && booking.assetId === asset.id
-    );
-  }
-
-  const dateBookings = existingBookings.filter(booking => 
-    booking.assetId === asset.id && isSameDay(booking.date, date)
   );
 
-  // If maxBookingsPerDay is set, check if we've reached the limit
-  if (asset.maxBookingsPerDay && dateBookings.length >= asset.maxBookingsPerDay) {
-    return false;
-  }
+  return unsubscribe;
+};
 
-  // Check if the requested time slot overlaps with any existing bookings
-  return !dateBookings.some(booking => {
-    if (!booking.timeSlot) return false;
-    
-    const requestedStart = parseTime(timeSlot.start);
-    const requestedEnd = parseTime(timeSlot.end);
-    const existingStart = parseTime(booking.timeSlot.start);
-    const existingEnd = parseTime(booking.timeSlot.end);
+export const createBooking = async (organizationId: string, booking: Omit<Booking, 'id' | 'createdAt' | 'updatedAt'>) => {
+  const bookingsRef = collection(db, 'organizations', organizationId, 'bookings');
+  const docRef = await addDoc(bookingsRef, {
+    ...booking,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+  return docRef.id;
+};
 
-    return (
-      (requestedStart >= existingStart && requestedStart < existingEnd) ||
-      (requestedEnd > existingStart && requestedEnd <= existingEnd) ||
-      (requestedStart <= existingStart && requestedEnd >= existingEnd)
-    );
+export const updateBooking = async (organizationId: string, bookingId: string, booking: Partial<Booking>) => {
+  const bookingRef = doc(db, 'organizations', organizationId, 'bookings', bookingId);
+  await updateDoc(bookingRef, {
+    ...booking,
+    updatedAt: serverTimestamp(),
   });
 };
 
-// Helper function to parse time string to minutes since midnight
-const parseTime = (time: string): number => {
-  const [hours, minutes] = time.split(':').map(Number);
-  return hours * 60 + minutes;
+export const deleteBooking = async (organizationId: string, bookingId: string) => {
+  const bookingRef = doc(db, 'organizations', organizationId, 'bookings', bookingId);
+  await deleteDoc(bookingRef);
 };
 
-const isSameDay = (date1: Date, date2: Date): boolean => {
-  return (
-    date1.getFullYear() === date2.getFullYear() &&
-    date1.getMonth() === date2.getMonth() &&
-    date1.getDate() === date2.getDate()
+export const subscribeToAnalytics = (organizationId: string, callback: (analytics: Analytics | null) => void) => {
+  const unsubscribe = onSnapshot(
+    doc(db, 'organizations', organizationId, 'analytics', 'summary'),
+    (doc) => {
+      if (doc.exists()) {
+        callback(doc.data() as Analytics);
+      } else {
+        callback(null);
+      }
+    },
+    (error) => {
+      console.error('Error fetching analytics:', error);
+      callback(null);
+    }
   );
+
+  return unsubscribe;
+};
+
+export const subscribeToActivityLogs = (organizationId: string, callback: (logs: ActivityLog[]) => void) => {
+  const logsRef = collection(db, 'organizations', organizationId, 'activity_logs');
+  const logsQuery = query(logsRef, where('timestamp', '>=', new Date(Date.now() - 24 * 60 * 60 * 1000)));
+
+  const unsubscribe = onSnapshot(
+    logsQuery,
+    (snapshot) => {
+      const logs = snapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      } as ActivityLog));
+      callback(logs);
+    },
+    (error) => {
+      console.error('Error fetching activity logs:', error);
+      callback([]);
+    }
+  );
+
+  return unsubscribe;
+};
+
+export const addCategory = async (organizationId: string, category: string) => {
+  const orgRef = doc(db, 'organizations', organizationId);
+  await updateDoc(orgRef, {
+    categories: arrayUnion(category),
+    updatedAt: serverTimestamp(),
+  });
+};
+
+export const removeCategory = async (organizationId: string, category: string) => {
+  const orgRef = doc(db, 'organizations', organizationId);
+  await updateDoc(orgRef, {
+    categories: arrayRemove(category),
+    updatedAt: serverTimestamp(),
+  });
 };

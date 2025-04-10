@@ -5,28 +5,73 @@ service cloud.firestore {
     function isAuthenticated() {
       return request.auth != null;
     }
-    
+
     function isOwner(userId) {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
-    // User profiles
-    match /users/{userId} {
-      allow read, write: if isOwner(userId);
-      
-      // Assets subcollection
-      match /assets/{assetId} {
-        allow read: if isOwner(userId);
-        allow create: if isOwner(userId);
-        allow update, delete: if isOwner(userId);
+    function isOrganizationMember(orgId) {
+      return isAuthenticated() &&
+        exists(/databases/$(database)/documents/organizations/$(orgId)) &&
+        get(/databases/$(database)/documents/organizations/$(orgId)).data.members.hasAny([request.auth.uid]);
+    }
+
+    function isOrganizationOwner(orgId) {
+      return isAuthenticated() &&
+        exists(/databases/$(database)/documents/organizations/$(orgId)) &&
+        get(/databases/$(database)/documents/organizations/$(orgId)).data.ownerId == request.auth.uid;
+    }
+
+    // Organizations
+    match /organizations/{orgId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() &&
+        request.resource.data.ownerId == request.auth.uid &&
+        request.resource.data.members.hasOnly([request.auth.uid]) &&
+        request.resource.data.categories is list &&
+        request.resource.data.currency is string;
+      allow update, delete: if isOrganizationOwner(orgId);
+
+      // Subcollections
+
+      // User permissions
+      match /user_permissions/{userId} {
+        allow read: if isOrganizationMember(orgId) && (userId == request.auth.uid || isOrganizationOwner(orgId));
+        allow write: if isOrganizationOwner(orgId);
       }
 
-      // Bookings subcollection
-      match /bookings/{bookingId} {
-        allow read: if isOwner(userId);
-        allow create: if isOwner(userId);
-        allow update, delete: if isOwner(userId);
+      // Analytics
+      match /analytics/{docId} {
+        allow read: if isOrganizationMember(orgId);
+        allow write: if isOrganizationOwner(orgId);
       }
+
+      // Assets
+      match /assets/{assetId} {
+        allow read, create, update, delete: if isOrganizationMember(orgId);
+      }
+
+      // Bookings
+      match /bookings/{bookingId} {
+        allow read, create, update, delete: if isOrganizationMember(orgId);
+      }
+
+      // Activity logs
+      match /activity_logs/{logId} {
+        allow read, create: if isOrganizationMember(orgId);
+        allow update, delete: if false; // Immutable
+      }
+    }
+
+    // Users
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && request.auth.uid == userId;
+      allow update: if isOwner(userId) || (
+        isAuthenticated() &&
+        request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['organizationId', 'updatedAt', 'isOwner']));
+      allow delete: if false;
     }
   }
 }

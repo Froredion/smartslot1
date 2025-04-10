@@ -2,11 +2,20 @@ import { View, Text, StyleSheet, FlatList, TouchableOpacity, ScrollView, Activit
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Plus, AlertCircle } from 'lucide-react-native';
 import { useState, useEffect } from 'react';
-import { AssetEditModal } from '@/components/AssetEditModal';
-import { CategoryManager } from '@/components/CategoryManager';
-import { auth } from '@/lib/firebase/config';
-import { subscribeToUserProfile, addCategory, removeCategory, subscribeToAssets, createAsset, updateAsset, deleteAsset } from '@/lib/firebase/firestore';
-import type { Asset } from '@/lib/firebase/firestore';
+import { AssetEditModal } from '../../components/AssetEditModal';
+import { CategoryManager } from '../../components/CategoryManager';
+import { auth } from '../../lib/firebase/config';
+import { 
+  subscribeToUserProfile, 
+  subscribeToOrganizations,
+  subscribeToAssets, 
+  createAsset, 
+  updateAsset, 
+  deleteAsset,
+  addCategory,
+  removeCategory,
+  type Asset 
+} from '../../lib/firebase/firestore';
 
 export default function Assets() {
   const insets = useSafeAreaInsets();
@@ -19,29 +28,30 @@ export default function Assets() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [selectedOrg, setSelectedOrg] = useState<{ id: string; name: string } | null>(null);
 
   useEffect(() => {
+    if (!auth.currentUser) return;
+
     let unsubscribeProfile: (() => void) | undefined;
+    let unsubscribeOrgs: (() => void) | undefined;
     let unsubscribeAssets: (() => void) | undefined;
 
     const setupSubscriptions = async () => {
-      if (!auth.currentUser) return;
-
       try {
         setError(null);
         
-        // Subscribe to user profile for categories
-        unsubscribeProfile = subscribeToUserProfile(auth.currentUser.uid, (profile) => {
-          if (profile) {
-            setCategories(profile.categories || []);
+        // Subscribe to organizations
+        unsubscribeOrgs = subscribeToOrganizations(auth.currentUser.uid, (orgs) => {
+          if (orgs.length > 0 && !selectedOrg) {
+            setSelectedOrg({
+              id: orgs[0].id,
+              name: orgs[0].name
+            });
+            setCategories(orgs[0].categories || []);
           }
         });
 
-        // Subscribe to assets
-        unsubscribeAssets = subscribeToAssets((updatedAssets) => {
-          setAssets(updatedAssets);
-          setLoading(false);
-        });
       } catch (err: any) {
         setError(err.message || 'Failed to load data');
         setLoading(false);
@@ -49,29 +59,43 @@ export default function Assets() {
     };
 
     setupSubscriptions();
+
     return () => {
       unsubscribeProfile?.();
+      unsubscribeOrgs?.();
       unsubscribeAssets?.();
     };
   }, []);
 
+  // Subscribe to assets when organization is selected
+  useEffect(() => {
+    if (!selectedOrg) return;
+
+    const unsubscribe = subscribeToAssets(selectedOrg.id, (updatedAssets) => {
+      setAssets(updatedAssets);
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, [selectedOrg]);
+
   const handleAddCategory = async (category: string) => {
-    if (!auth.currentUser) return;
+    if (!selectedOrg) return;
 
     try {
       setError(null);
-      await addCategory(auth.currentUser.uid, category);
+      await addCategory(selectedOrg.id, category);
     } catch (err: any) {
       setError(err.message || 'Failed to add category');
     }
   };
 
   const handleDeleteCategory = async (category: string) => {
-    if (!auth.currentUser) return;
+    if (!selectedOrg) return;
 
     try {
       setError(null);
-      await removeCategory(auth.currentUser.uid, category);
+      await removeCategory(selectedOrg.id, category);
       if (selectedCategory === category) {
         setSelectedCategory(null);
       }
@@ -93,12 +117,14 @@ export default function Assets() {
   };
 
   const handleSaveAsset = async (updatedAsset: Omit<Asset, 'id' | 'createdAt' | 'updatedAt'>) => {
+    if (!selectedOrg) return;
+
     try {
       setError(null);
       if (isNewAsset) {
-        await createAsset(updatedAsset);
+        await createAsset(selectedOrg.id, updatedAsset);
       } else if (selectedAsset) {
-        await updateAsset(selectedAsset.id, updatedAsset);
+        await updateAsset(selectedOrg.id, selectedAsset.id, updatedAsset);
       }
       setEditModalVisible(false);
       setSelectedAsset(null);
@@ -109,14 +135,14 @@ export default function Assets() {
   };
 
   const handleDeleteAsset = async (assetId: string) => {
-    if (isDeleting) return;
+    if (!selectedOrg || isDeleting) return;
 
     try {
       setIsDeleting(true);
       setError(null);
       console.log('Assets - Starting asset deletion:', assetId);
       
-      await deleteAsset(assetId);
+      await deleteAsset(selectedOrg.id, assetId);
       console.log('Assets - Asset deleted successfully:', assetId);
       
       setEditModalVisible(false);
@@ -167,6 +193,14 @@ export default function Assets() {
       <View style={[styles.container, styles.loadingContainer]}>
         <ActivityIndicator size="large" color="#007AFF" />
         <Text style={styles.loadingText}>Loading assets...</Text>
+      </View>
+    );
+  }
+
+  if (!selectedOrg) {
+    return (
+      <View style={[styles.container, styles.loadingContainer]}>
+        <Text style={styles.loadingText}>No organization selected</Text>
       </View>
     );
   }

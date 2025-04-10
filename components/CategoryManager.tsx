@@ -51,6 +51,12 @@ export function CategoryManager({
     setRemoveModalVisible(false);
   };
 
+  const handleCloseRemoveModal = () => {
+    setRemoveModalVisible(false);
+    setSelectedToRemove(new Set());
+    setSearchQuery('');
+  };
+
   const filteredCategories = useMemo(() => {
     const query = searchQuery.toLowerCase().trim();
     if (!query) return categories;
@@ -58,12 +64,6 @@ export function CategoryManager({
       category.toLowerCase().includes(query)
     );
   }, [categories, searchQuery]);
-
-  const handleCloseRemoveModal = () => {
-    setRemoveModalVisible(false);
-    setSelectedToRemove(new Set());
-    setSearchQuery('');
-  };
 
   return (
     <View style={styles.container}>
@@ -93,8 +93,16 @@ export function CategoryManager({
         animationType="slide"
         onRequestClose={() => setAddModalVisible(false)}
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
+        <TouchableOpacity 
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setAddModalVisible(false)}
+        >
+          <TouchableOpacity 
+            style={styles.modalContent}
+            activeOpacity={1}
+            onPress={e => e.stopPropagation()}
+          >
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Add New Category</Text>
               <TouchableOpacity
@@ -112,6 +120,7 @@ export function CategoryManager({
                 onChangeText={setNewCategory}
                 placeholder="Enter category name"
                 autoFocus
+                onSubmitEditing={handleAddCategory}
               />
               <TouchableOpacity
                 style={[styles.saveButton, !newCategory.trim() && styles.disabledButton]}
@@ -121,8 +130,8 @@ export function CategoryManager({
                 <Text style={styles.saveButtonText}>Add Category</Text>
               </TouchableOpacity>
             </View>
-          </View>
-        </View>
+          </TouchableOpacity>
+        </TouchableOpacity>
       </Modal>
 
       {/* Remove Categories Modal */}

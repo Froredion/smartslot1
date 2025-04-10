@@ -45,6 +45,7 @@ export function BookingModal({
     clientName: '',
     numberOfPeople: '',
     customPrice: '',
+    customAgentFee: '',
     currency: 'USD',
     timeSlot: null as TimeSlot | null,
   });
@@ -59,6 +60,7 @@ export function BookingModal({
         clientName: editBooking.clientName || '',
         numberOfPeople: editBooking.numberOfPeople?.toString() || '',
         customPrice: editBooking.customPrice?.toString() || '',
+        customAgentFee: editBooking.customAgentFee?.toString() || '',
         currency: editBooking.currency,
         timeSlot: editBooking.timeSlot || null,
       });
@@ -69,10 +71,13 @@ export function BookingModal({
 
   const handleConfirm = async () => {
     try {
+      console.log('BookingModal - Starting booking confirmation...');
+      
       setError(null);
       setLoading(true);
 
       const selectedAsset = assets.find(a => a.id === bookingDetails.assetId);
+      
       if (!selectedAsset) {
         setError('Please select an asset');
         return;
@@ -84,39 +89,51 @@ export function BookingModal({
         return;
       }
 
-      // Validate and parse number fields
-      let numberOfPeople: number | undefined;
-      let customPrice: number | undefined;
+      // Parse numeric fields
+      let numberOfPeople: number | null = null;
+      let customPrice: number | null = null;
+      let customAgentFee: number | null = null;
 
       if (bookingDetails.numberOfPeople.trim()) {
-        const parsedPeople = parseInt(bookingDetails.numberOfPeople, 10);
-        if (!isNaN(parsedPeople) && parsedPeople > 0) {
-          numberOfPeople = parsedPeople;
+        numberOfPeople = parseInt(bookingDetails.numberOfPeople, 10);
+        if (isNaN(numberOfPeople) || numberOfPeople < 0) {
+          setError('Invalid number of people');
+          return;
         }
       }
 
       if (bookingDetails.customPrice.trim()) {
-        const parsedPrice = parseFloat(bookingDetails.customPrice);
-        if (!isNaN(parsedPrice) && parsedPrice >= 0) {
-          customPrice = parsedPrice;
+        customPrice = parseFloat(bookingDetails.customPrice);
+        if (isNaN(customPrice) || customPrice < 0) {
+          setError('Invalid custom price');
+          return;
+        }
+      }
+
+      if (bookingDetails.customAgentFee.trim()) {
+        customAgentFee = parseFloat(bookingDetails.customAgentFee);
+        if (isNaN(customAgentFee) || customAgentFee < 0) {
+          setError('Invalid agent fee percentage');
+          return;
         }
       }
 
       const bookingData = {
         assetId: selectedAsset.id,
         date: selectedDate,
-        description: bookingDetails.description.trim() || undefined,
-        clientName: bookingDetails.clientName.trim() || undefined,
-        numberOfPeople,
-        customPrice,
+        description: bookingDetails.description.trim() || null,
+        clientName: bookingDetails.clientName.trim() || null,
+        numberOfPeople: numberOfPeople,
+        customPrice: customPrice,
+        customAgentFee: customAgentFee !== selectedAsset.agentFee ? customAgentFee : null,
         currency: selectedAsset.currency,
-        timeSlot: bookingDetails.timeSlot || undefined,
+        timeSlot: bookingDetails.timeSlot || null,
       };
 
       await onConfirm(bookingData);
       onClose();
     } catch (err: any) {
-      console.error('Error in handleConfirm:', err);
+      console.error('BookingModal - Error in handleConfirm:', err);
       setError(err.message || 'Failed to save booking');
     } finally {
       setLoading(false);
@@ -147,7 +164,7 @@ export function BookingModal({
           b.assetId === selectedAsset.id && 
           format(b.date, 'yyyy-MM-dd') === format(selectedDate, 'yyyy-MM-dd') &&
           b.timeSlot &&
-          (!editBooking || b.id !== editBooking.id) // Exclude current booking if editing
+          (!editBooking || b.id !== editBooking.id)
         )
         .map(b => b.timeSlot!)
     : [];
@@ -205,9 +222,9 @@ export function BookingModal({
                   <TimeSlotSelector
                     timeSlots={selectedAsset.timeSlots}
                     selectedTimeSlot={bookingDetails.timeSlot}
-                    onSelectTimeSlot={(timeSlot) => 
-                      setBookingDetails(prev => ({ ...prev, timeSlot }))
-                    }
+                    onSelectTimeSlot={(timeSlot) => {
+                      setBookingDetails(prev => ({ ...prev, timeSlot }));
+                    }}
                     bookedTimeSlots={bookedTimeSlots}
                   />
                 </View>
@@ -264,6 +281,20 @@ export function BookingModal({
                   value={bookingDetails.customPrice}
                   onChangeText={(text) => setBookingDetails(prev => ({ ...prev, customPrice: text }))}
                   placeholder={`Default: ${selectedAsset.currency} ${selectedAsset.pricePerDay}`}
+                  keyboardType="numeric"
+                />
+              </View>
+
+              <View style={styles.inputGroup}>
+                <View style={styles.inputLabel}>
+                  <DollarSign size={16} color="#666" />
+                  <Text style={styles.labelText}>Agent Fee % (Optional)</Text>
+                </View>
+                <TextInput
+                  style={styles.input}
+                  value={bookingDetails.customAgentFee}
+                  onChangeText={(text) => setBookingDetails(prev => ({ ...prev, customAgentFee: text }))}
+                  placeholder={`Default: ${selectedAsset.agentFee}%`}
                   keyboardType="numeric"
                 />
               </View>

@@ -40,18 +40,17 @@ export function AssetEditModal({
   const [showTimeSlotManager, setShowTimeSlotManager] = useState(false);
   const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
 
-  // Update editedAsset when the asset prop changes
   React.useEffect(() => {
     if (visible) {
       if (isNewAsset && categories.length > 0) {
-        // For new assets, set default values including the first category
         setEditedAsset({
           id: Date.now().toString(),
           name: '',
-          type: categories[0], // Set first category as default
+          type: categories[0],
           status: 'Available',
           description: '',
           pricePerDay: 0,
+          agentFee: 10, // Default 10% agent fee
           currency: 'USD',
           bookingType: 'full-day',
           timeSlots: [],
@@ -66,6 +65,7 @@ export function AssetEditModal({
           status: 'Available',
           description: '',
           pricePerDay: 0,
+          agentFee: 10,
           currency: 'USD',
           bookingType: 'full-day',
           timeSlots: [],
@@ -80,7 +80,6 @@ export function AssetEditModal({
     if (!editedAsset) return;
     console.log('AssetEditModal - Saving asset:', editedAsset);
 
-    // Clean up the asset data before saving
     const cleanAsset = {
       name: editedAsset.name || '',
       type: editedAsset.type || '',
@@ -91,6 +90,7 @@ export function AssetEditModal({
       bookingType: editedAsset.bookingType || 'full-day',
       timeSlots: editedAsset.timeSlots || [],
       maxBookingsPerDay: editedAsset.maxBookingsPerDay,
+      agentFee: editedAsset.agentFee || 10,
     };
 
     onSave(cleanAsset);
@@ -130,8 +130,16 @@ export function AssetEditModal({
       transparent={true}
       onRequestClose={handleClose}
     >
-      <View style={styles.modalOverlay}>
-        <View style={styles.modalContent}>
+      <TouchableOpacity 
+        style={styles.modalOverlay}
+        activeOpacity={1}
+        onPress={handleClose}
+      >
+        <TouchableOpacity 
+          style={styles.modalContent}
+          activeOpacity={1}
+          onPress={e => e.stopPropagation()}
+        >
           <View style={styles.modalHeader}>
             <Text style={styles.modalTitle}>
               {isNewAsset ? 'New Asset' : 'Edit Asset'}
@@ -183,13 +191,27 @@ export function AssetEditModal({
               <Text style={styles.label}>Price per Day</Text>
               <TextInput
                 style={styles.input}
-                value={editedAsset.pricePerDay?.toString() || '0'}
+                value={editedAsset?.pricePerDay?.toString() || '0'}
                 onChangeText={(text) => {
                   const price = parseFloat(text) || 0;
-                  setEditedAsset({ ...editedAsset, pricePerDay: price });
+                  setEditedAsset(prev => prev ? ({ ...prev, pricePerDay: price }) : null);
                 }}
                 keyboardType="numeric"
                 placeholder="Enter price per day"
+              />
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Default Agent Fee (%)</Text>
+              <TextInput
+                style={styles.input}
+                value={editedAsset?.agentFee?.toString() || '10'}
+                onChangeText={(text) => {
+                  const fee = parseFloat(text) || 0;
+                  setEditedAsset(prev => prev ? ({ ...prev, agentFee: fee }) : null);
+                }}
+                keyboardType="numeric"
+                placeholder="Enter default agent fee percentage"
               />
             </View>
 
@@ -311,8 +333,16 @@ export function AssetEditModal({
             animationType="slide"
             onRequestClose={() => setShowCategorySearch(false)}
           >
-            <View style={styles.modalOverlay}>
-              <View style={styles.modalContent}>
+            <TouchableOpacity 
+              style={styles.modalOverlay}
+              activeOpacity={1}
+              onPress={() => setShowCategorySearch(false)}
+            >
+              <TouchableOpacity 
+                style={styles.modalContent}
+                activeOpacity={1}
+                onPress={e => e.stopPropagation()}
+              >
                 <View style={styles.modalHeader}>
                   <Text style={styles.modalTitle}>Select Category</Text>
                   <TouchableOpacity
@@ -373,8 +403,8 @@ export function AssetEditModal({
                     </View>
                   )}
                 </ScrollView>
-              </View>
-            </View>
+              </TouchableOpacity>
+            </TouchableOpacity>
           </Modal>
 
           {/* Time Slot Manager Modal */}
@@ -394,14 +424,14 @@ export function AssetEditModal({
             onConfirm={() => {
               console.log('AssetEditModal - Deleting asset:', editedAsset?.id);
               onDelete(editedAsset!.id);
-              handleClose(); // Close the modal after deletion
+              handleClose();
               setShowDeleteConfirmation(false);
             }}
             title="Delete Asset"
             message="Are you sure you want to delete this asset? This action cannot be undone and will remove all associated bookings."
           />
-        </View>
-      </View>
+        </TouchableOpacity>
+      </TouchableOpacity>
     </Modal>
   );
 }
