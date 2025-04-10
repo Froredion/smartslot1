@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback, useEffect } from 'react';
+import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -40,6 +40,12 @@ export default function Calendar() {
   const [refreshing, setRefreshing] = useState(false);
   const [selectedOrg, setSelectedOrg] = useState<{ id: string; name: string } | null>(null);
   const [isMonthNavigation, setIsMonthNavigation] = useState(false);
+  const [lastAction, setLastAction] = useState<'select' | 'navigate'>('select');
+  const [calendarKey, setCalendarKey] = useState(0);
+  const [isNavigating, setIsNavigating] = useState(false);
+  const [isAnimating, setIsAnimating] = useState(false);
+  const navigationTimeout = useRef<NodeJS.Timeout>();
+  const animationTimeout = useRef<NodeJS.Timeout>();
 
   useEffect(() => {
     console.log('DEBUG: selectedDate changed to:', selectedDate);
@@ -173,96 +179,169 @@ export default function Calendar() {
     return dates;
   }, [getDateAvailability]);
 
-  const navigateMonth = (direction: 'prev' | 'next') => {
-    console.log(`DEBUG: Navigating month ${direction} from:`, format(currentMonth, 'yyyy-MM'));
-    console.log(`DEBUG: Current selected date before navigation:`, format(selectedDate, 'yyyy-MM-dd'));
-    
-    // Set flag to indicate we're navigating months
-    setIsMonthNavigation(true);
-    
-    const newMonth = direction === 'prev' 
-      ? subMonths(currentMonth, 1) 
-      : addMonths(currentMonth, 1);
-    
-    console.log(`DEBUG: New month will be:`, format(newMonth, 'yyyy-MM'));
-    
-    // Update both the current month and selected date to the first day of the new month
-    // This ensures the calendar view and selected date are in sync
-    setCurrentMonth(newMonth);
-    setSelectedDate(newMonth);
-    
-    console.log(`DEBUG: Selected date updated to:`, format(newMonth, 'yyyy-MM-dd'));
+  const debounce = (func: Function, wait: number) => {
+    let timeoutId: NodeJS.Timeout;
+    return (...args: any[]) => {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+      timeoutId = setTimeout(() => func(...args), wait);
+    };
+  };
+
+  const getStartingDate = (date: Date) => {
+    // Calculate a date 3 days before the selected date to center it in the week view
+    return addDays(date, -3);
   };
 
   const handleDateSelect = (date: any) => {
+    console.log('----------------------------------------');
+    console.log('DEBUG: Date selection started');
     console.log('DEBUG: Date selected (raw):', date);
-    console.log('DEBUG: Current month before selection:', format(currentMonth, 'yyyy-MM'));
-    console.log('DEBUG: Current selected date before selection:', format(selectedDate, 'yyyy-MM-dd'));
-    console.log('DEBUG: Is month navigation?', isMonthNavigation);
+    console.log('DEBUG: Current states before selection:', {
+      currentMonth: format(currentMonth, 'yyyy-MM-dd'),
+      selectedDate: selectedDate ? format(selectedDate, 'yyyy-MM-dd') : null,
+      isNavigating,
+      isAnimating,
+      isMonthNavigation,
+      lastAction
+    });
     
-    // Reset the month navigation flag
+    // Reset the month navigation flag since this is a direct date selection
+    setIsNavigating(false);
+    setIsAnimating(false);
     setIsMonthNavigation(false);
+    setLastAction('select');
     
-    // Check if it's a Moment object
+    let newDate: Date;
     if (date && date._isAMomentObject) {
-      console.log('DEBUG: Converting Moment to Date');
-      // Convert Moment to Date
-      const newDate = date.toDate();
+      newDate = date.toDate();
       console.log('DEBUG: Converted Moment to Date:', format(newDate, 'yyyy-MM-dd'));
-      console.log('DEBUG: Selected date day of month:', newDate.getDate());
-      
-      // Set the selected date to the exact date chosen
-      setSelectedDate(newDate);
-      
-      // Only update the current month if the selected date is in a different month
-      const selectedMonth = startOfMonth(newDate);
-      const currentMonthStart = startOfMonth(currentMonth);
-      
-      console.log('DEBUG: Selected month start:', format(selectedMonth, 'yyyy-MM-dd'));
-      console.log('DEBUG: Current month start:', format(currentMonthStart, 'yyyy-MM-dd'));
-      console.log('DEBUG: Are months the same?', isSameDay(selectedMonth, currentMonthStart));
-      
-      if (!isSameDay(selectedMonth, currentMonthStart)) {
-        console.log('DEBUG: Selected date is in a different month, updating current month');
-        // Only update the month, not the selected date
-        setCurrentMonth(selectedMonth);
-      } else {
-        console.log('DEBUG: Selected date is in the same month, keeping current month');
-      }
-      
-      setSelectedAsset(null);
-      setSelectedBooking(null);
     } else if (isValid(date)) {
-      console.log('DEBUG: Setting selected date to:', format(date, 'yyyy-MM-dd'));
-      console.log('DEBUG: Selected date day of month:', date.getDate());
-      // Create a new Date object to ensure state update
-      const newDate = new Date(date);
-      
-      // Set the selected date to the exact date chosen
-      setSelectedDate(newDate);
-      
-      // Only update the current month if the selected date is in a different month
-      const selectedMonth = startOfMonth(newDate);
-      const currentMonthStart = startOfMonth(currentMonth);
-      
-      console.log('DEBUG: Selected month start:', format(selectedMonth, 'yyyy-MM-dd'));
-      console.log('DEBUG: Current month start:', format(currentMonthStart, 'yyyy-MM-dd'));
-      console.log('DEBUG: Are months the same?', isSameDay(selectedMonth, currentMonthStart));
-      
-      if (!isSameDay(selectedMonth, currentMonthStart)) {
-        console.log('DEBUG: Selected date is in a different month, updating current month');
-        // Only update the month, not the selected date
-        setCurrentMonth(selectedMonth);
-      } else {
-        console.log('DEBUG: Selected date is in the same month, keeping current month');
-      }
-      
-      setSelectedAsset(null);
-      setSelectedBooking(null);
+      newDate = new Date(date);
+      console.log('DEBUG: Setting selected date to:', format(newDate, 'yyyy-MM-dd'));
     } else {
-      console.log('DEBUG: Invalid date selected:', date);
+      console.log('DEBUG: Invalid date selected');
+      return;
+    }
+    
+    // Update selected date first
+    setSelectedDate(newDate);
+    
+    // Update current month to center around the selected date
+    const selectedMonth = startOfMonth(newDate);
+    setCurrentMonth(selectedMonth);
+    
+    // Force calendar to re-render centered on the new date
+    setCalendarKey(prevKey => prevKey + 1);
+    
+    setSelectedAsset(null);
+    setSelectedBooking(null);
+    
+    console.log('DEBUG: Date selection complete');
+    console.log('----------------------------------------');
+  };
+
+  const handleMonthNavigation = (direction: 'prev' | 'next') => {
+    // Skip if currently navigating or animating
+    if (isNavigating || isAnimating) {
+      console.log('DEBUG: Navigation in progress, skipping');
+      return;
+    }
+
+    console.log('----------------------------------------');
+    console.log(`DEBUG: Starting month navigation (${direction})`);
+    console.log(`DEBUG: Current month before navigation:`, format(currentMonth, 'yyyy-MM-dd'));
+    console.log(`DEBUG: Current selected date before navigation:`, format(selectedDate, 'yyyy-MM-dd'));
+    
+    setIsNavigating(true);
+    setIsAnimating(true);
+    setIsMonthNavigation(true);
+    setLastAction('navigate');
+    
+    // Use a callback to ensure we have the latest state
+    setCurrentMonth(prevMonth => {
+      const newMonth = direction === 'prev' 
+        ? subMonths(prevMonth, 1) 
+        : addMonths(prevMonth, 1);
+
+      // Check if the new month is within our allowed range
+      const minAllowedDate = addMonths(startOfMonth(new Date()), -12);
+      const maxAllowedDate = addMonths(startOfMonth(new Date()), 24);
+
+      console.log('DEBUG: Date range validation:', {
+        minAllowedDate: format(minAllowedDate, 'yyyy-MM-dd'),
+        maxAllowedDate: format(maxAllowedDate, 'yyyy-MM-dd'),
+        newMonth: format(newMonth, 'yyyy-MM-dd'),
+        isBeforeMin: newMonth < minAllowedDate,
+        isAfterMax: newMonth > maxAllowedDate
+      });
+
+      if (newMonth < minAllowedDate || newMonth > maxAllowedDate) {
+        console.log('DEBUG: Attempted to navigate outside allowed date range');
+        console.log('----------------------------------------');
+        // Reset navigation states if we hit the limits
+        setIsNavigating(false);
+        setIsAnimating(false);
+        setIsMonthNavigation(false);
+        return prevMonth; // Keep the current month
+      }
+
+      console.log(`DEBUG: New month will be:`, format(newMonth, 'yyyy-MM-dd'));
+      
+      // Update selected date and trigger re-render after the month is updated
+      setTimeout(() => {
+        setSelectedDate(newMonth);
+        setCalendarKey(prevKey => {
+          console.log('DEBUG: Incrementing calendar key from:', prevKey);
+          return prevKey + 1;
+        });
+        setIsAnimating(false);
+        
+        setTimeout(() => {
+          setIsNavigating(false);
+          console.log('DEBUG: Navigation complete');
+          console.log('----------------------------------------');
+        }, 100);
+      }, 50);
+
+      return newMonth;
+    });
+  };
+
+  // Create debounced version of handleMonthNavigation
+  const navigateMonth = useCallback(
+    debounce(handleMonthNavigation, 200),
+    []
+  );
+
+  const navigateWeek = (direction: 'prev' | 'next') => {
+    console.log(`DEBUG: Navigating week ${direction} from:`, format(selectedDate, 'yyyy-MM-dd'));
+    
+    const newDate = direction === 'prev'
+      ? addDays(selectedDate, -7)
+      : addDays(selectedDate, 7);
+    
+    console.log(`DEBUG: New date will be:`, format(newDate, 'yyyy-MM-dd'));
+    
+    // Update the selected date
+    setSelectedDate(newDate);
+    
+    // Check if we need to update the current month
+    const newMonth = startOfMonth(newDate);
+    if (!isSameDay(startOfMonth(currentMonth), newMonth)) {
+      console.log('DEBUG: Week navigation crossed month boundary, updating current month');
+      setCurrentMonth(newMonth);
+      setCalendarKey(prevKey => prevKey + 1);
     }
   };
+
+  // Add useEffect to ensure calendar is centered on selected date when component mounts
+  useEffect(() => {
+    const initialDate = selectedDate || new Date();
+    setCurrentMonth(startOfMonth(initialDate));
+    setCalendarKey(prevKey => prevKey + 1);
+  }, []);
 
   const handleAssetPress = (asset: Asset, booking?: Booking) => {
     setSelectedAsset(asset.id);
@@ -427,6 +506,18 @@ export default function Calendar() {
     );
   };
 
+  // Cleanup timeouts on unmount
+  useEffect(() => {
+    return () => {
+      if (navigationTimeout.current) {
+        clearTimeout(navigationTimeout.current);
+      }
+      if (animationTimeout.current) {
+        clearTimeout(animationTimeout.current);
+      }
+    };
+  }, []);
+
   if (loading) {
     return (
       <View style={[styles.container, styles.loadingContainer]}>
@@ -454,23 +545,48 @@ export default function Calendar() {
 
       <View style={styles.monthSelector}>
         <TouchableOpacity 
-          style={styles.monthButton} 
+          style={[styles.monthButton, (isNavigating || isAnimating) && styles.monthButtonDisabled]} 
+          disabled={isNavigating || isAnimating}
           onPress={() => navigateMonth('prev')}
         >
-          <ChevronLeft size={24} />
+          <View style={{ opacity: isNavigating || isAnimating ? 0.5 : 1 }}>
+            <ChevronLeft size={24} />
+          </View>
         </TouchableOpacity>
         <Text style={styles.monthText}>
           {format(currentMonth, 'MMMM yyyy')}
         </Text>
         <TouchableOpacity 
-          style={styles.monthButton} 
+          style={[styles.monthButton, (isNavigating || isAnimating) && styles.monthButtonDisabled]}
+          disabled={isNavigating || isAnimating}
           onPress={() => navigateMonth('next')}
         >
-          <ChevronRight size={24} />
+          <View style={{ opacity: isNavigating || isAnimating ? 0.5 : 1 }}>
+            <ChevronRight size={24} />
+          </View>
+        </TouchableOpacity>
+      </View>
+
+      <View style={styles.weekSelector}>
+        <TouchableOpacity 
+          style={styles.weekButton} 
+          onPress={() => navigateWeek('prev')}
+        >
+          <ChevronLeft size={20} />
+        </TouchableOpacity>
+        <Text style={styles.weekText}>
+          {format(selectedDate, 'MMM d')} - {format(addDays(selectedDate, 6), 'MMM d')}
+        </Text>
+        <TouchableOpacity 
+          style={styles.weekButton} 
+          onPress={() => navigateWeek('next')}
+        >
+          <ChevronRight size={20} />
         </TouchableOpacity>
       </View>
 
       <CalendarStrip
+        key={calendarKey}
         style={styles.calendar}
         calendarHeaderStyle={styles.calendarHeader}
         dateNumberStyle={styles.dateNumber}
@@ -481,10 +597,11 @@ export default function Calendar() {
         calendarHeaderFormat={'MMMM yyyy'}
         onDateSelected={handleDateSelect}
         selectedDate={selectedDate}
-        startingDate={currentMonth}
-        minDate={addDays(new Date(), -365)}
-        maxDate={addDays(new Date(), 365)}
-        scrollable
+        startingDate={selectedDate ? getStartingDate(selectedDate) : currentMonth}
+        minDate={addMonths(startOfMonth(new Date()), -12)}
+        maxDate={addMonths(startOfMonth(new Date()), 24)}
+        scrollable={false}
+        showMonth={false}
         upperCaseDays={false}
         markedDates={markedDates}
         useIsoWeekday={false}
@@ -585,9 +702,29 @@ const styles = StyleSheet.create({
   monthButton: {
     padding: 8,
   },
+  monthButtonDisabled: {
+    opacity: 0.5,
+  },
   monthText: {
     fontSize: 18,
     fontWeight: '600',
+    marginHorizontal: 16,
+  },
+  weekSelector: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 8,
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  weekButton: {
+    padding: 8,
+  },
+  weekText: {
+    fontSize: 16,
+    fontWeight: '500',
     marginHorizontal: 16,
   },
   calendar: {
