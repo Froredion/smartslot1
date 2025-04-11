@@ -19,11 +19,24 @@ export const validatePassword = (password: string): boolean => {
 };
 
 /**
+ * Checks if a string looks like an email address
+ * @param str The string to check
+ * @returns boolean indicating if the string looks like an email
+ */
+export const looksLikeEmail = (str: string): boolean => {
+  // Simple email pattern check - contains @ and a dot after @
+  return /^[^@]+@[^@]+\.[^@]+$/.test(str);
+};
+
+/**
  * Validates a username
  * @param username The username to validate
  * @returns boolean indicating if the username is valid
  */
 export const validateUsername = (username: string): boolean => {
   // Username must be at least 3 characters long and only contain letters, numbers, and underscores
-  return username.length >= 3 && /^[a-zA-Z0-9_]+$/.test(username);
+  // Also prevent usernames that look like emails
+  return username.length >= 3 && 
+         /^[a-zA-Z0-9_]+$/.test(username) && 
+         !looksLikeEmail(username);
 }; 

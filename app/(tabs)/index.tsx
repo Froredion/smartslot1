@@ -1,13 +1,26 @@
-import { View, Text, StyleSheet, ScrollView, ActivityIndicator, RefreshControl, TouchableOpacity, Modal, Platform } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, Platform, RefreshControl, ActivityIndicator } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useState, useEffect } from 'react';
 import { format } from 'date-fns';
-import { subscribeToAssets, subscribeToBookings, subscribeToAnalytics, subscribeToActivityLogs, subscribeToUserProfile, subscribeToOrganizations } from '../../lib/firebase/firestore';
-import type { Asset, Booking, Analytics, ActivityLog, UserProfile, Organization } from '../../lib/firebase/firestore';
-import { auth } from '../../lib/firebase/config';
-import { UserAccessModal } from '../../components/UserAccessModal';
-import { OrganizationModal } from '../../components/OrganizationModal';
-import { Users, Building2, Plus, ChevronDown, ChevronRight } from 'lucide-react-native';
+import { 
+  subscribeToAssets, 
+  subscribeToBookings, 
+  subscribeToAnalytics, 
+  subscribeToActivityLogs, 
+  subscribeToUserProfile, 
+  subscribeToOrganizations,
+  subscribeToOrganizationUsers,
+  type Organization,
+  type UserProfile,
+  type Asset,
+  type Booking,
+  type Analytics,
+  type ActivityLog,
+} from '../../lib/firebase/firestore';
+import { auth } from '@/lib/firebase/config';
+import { UserAccessModal } from '@/components/UserAccessModal';
+import { OrganizationModal } from '@/components/OrganizationModal';
+import { Building2, Plus, ChevronDown, ChevronRight, CreditCard as Edit2, Users } from 'lucide-react-native';
 import { router } from 'expo-router';
 
 export default function Dashboard() {
@@ -24,6 +37,8 @@ export default function Dashboard() {
   const [showAccessModal, setShowAccessModal] = useState(false);
   const [showOrgModal, setShowOrgModal] = useState(false);
   const [showOrgSelector, setShowOrgSelector] = useState(false);
+  const [editingOrg, setEditingOrg] = useState<Organization | null>(null);
+  const [orgUsers, setOrgUsers] = useState<Array<{id: string; email: string; isOwner?: boolean}>>([]);
 
   useEffect(() => {
     if (!auth.currentUser) {
@@ -31,19 +46,14 @@ export default function Dashboard() {
       return;
     }
 
-    let unsubscribeAssets: (() => void) | undefined;
-    let unsubscribeBookings: (() => void) | undefined;
-    let unsubscribeAnalytics: (() => void) | undefined;
-    let unsubscribeActivityLogs: (() => void) | undefined;
     let unsubscribeProfile: (() => void) | undefined;
-    let unsubscribeOrganizations: (() => void) | undefined;
+    let unsubscribeOrgs: (() => void) | undefined;
 
     const setupSubscriptions = async () => {
       try {
         console.log('Dashboard - Setting up initial subscriptions');
         
-        // Subscribe to user profile
-        unsubscribeProfile = subscribeToUserProfile(auth.currentUser.uid, (profile) => {
+        unsubscribeProfile = subscribeToUserProfile(auth.currentUser!.uid, (profile) => {
           console.log('Dashboard - User Profile Update:', {
             isOwner: profile?.isOwner,
             email: profile?.email
@@ -51,18 +61,25 @@ export default function Dashboard() {
           setUserProfile(profile);
         });
 
-        // Subscribe to organizations
-        unsubscribeOrganizations = subscribeToOrganizations(auth.currentUser.uid, (orgs) => {
+        unsubscribeOrgs = subscribeToOrganizations(auth.currentUser!.uid, (orgs) => {
           console.log('Dashboard - Organizations Update:', {
             count: orgs.length,
             orgIds: orgs.map(org => org.id)
           });
           setOrganizations(orgs);
           
-          // If no organization is selected, select the first one
-          if (!selectedOrg && orgs.length > 0) {
-            console.log('Dashboard - Auto-selecting first organization:', orgs[0].id);
-            setSelectedOrg(orgs[0]);
+          // Always select the first organization if there are any
+          if (orgs.length > 0) {
+            // If the current selected org is not in the list, select the first one
+            if (!selectedOrg || !orgs.some(org => org.id === selectedOrg.id)) {
+              console.log('Dashboard - Auto-selecting first organization:', orgs[0].id);
+              setSelectedOrg(orgs[0]);
+            } else {
+              console.log('Dashboard - Keeping current organization:', selectedOrg.id);
+            }
+          } else {
+            console.log('Dashboard - No organizations available');
+            setSelectedOrg(null);
           }
         });
 
@@ -78,25 +95,23 @@ export default function Dashboard() {
     setupSubscriptions();
 
     return () => {
-      console.log('Dashboard - Cleaning up subscriptions');
-      unsubscribeAssets?.();
-      unsubscribeBookings?.();
-      unsubscribeAnalytics?.();
-      unsubscribeActivityLogs?.();
       unsubscribeProfile?.();
-      unsubscribeOrganizations?.();
+      unsubscribeOrgs?.();
     };
   }, []);
 
-  // Subscribe to organization-specific data when selected org changes
   useEffect(() => {
-    if (!selectedOrg) {
-      console.log('Dashboard - No organization selected');
+    if (!selectedOrg?.id) {
+      // If selectedOrg is null but there are organizations available, select the first one
+      if (organizations.length > 0) {
+        console.log('Dashboard - No organization selected, auto-selecting first one:', organizations[0].id);
+        setSelectedOrg(organizations[0]);
+        return;
+      }
       return;
     }
 
-    console.log('Dashboard - Setting up org-specific subscriptions for:', selectedOrg.id);
-
+    let unsubscribeUsers: (() => void) | undefined;
     let unsubscribeAssets: (() => void) | undefined;
     let unsubscribeBookings: (() => void) | undefined;
     let unsubscribeAnalytics: (() => void) | undefined;
@@ -104,6 +119,11 @@ export default function Dashboard() {
 
     const setupOrgSubscriptions = async () => {
       try {
+        unsubscribeUsers = subscribeToOrganizationUsers(selectedOrg.id, (users) => {
+          console.log('Dashboard - Organization Users Update:', users);
+          setOrgUsers(users);
+        });
+
         unsubscribeAssets = subscribeToAssets(selectedOrg.id, (updatedAssets) => {
           console.log('Dashboard - Assets Update:', {
             count: updatedAssets.length
@@ -142,29 +162,45 @@ export default function Dashboard() {
     setupOrgSubscriptions();
 
     return () => {
-      console.log('Dashboard - Cleaning up org-specific subscriptions');
+      unsubscribeUsers?.();
       unsubscribeAssets?.();
       unsubscribeBookings?.();
       unsubscribeAnalytics?.();
       unsubscribeActivityLogs?.();
     };
+  }, [selectedOrg?.id]);
+
+  // Add a debug effect to log selectedOrg changes
+  useEffect(() => {
+    console.log('Dashboard - SelectedOrg changed:', selectedOrg ? {
+      id: selectedOrg.id,
+      name: selectedOrg.name
+    } : 'null');
   }, [selectedOrg]);
 
   const activeAssets = assets.filter(asset => asset.status === 'Available');
   const todayBookings = bookings.filter(booking => {
-    const bookingDate = booking.date instanceof Date ? booking.date : booking.date.toDate();
+    let bookingDate: Date;
+    if (booking.date instanceof Date) {
+      bookingDate = booking.date;
+    } else if (typeof booking.date === 'object' && booking.date !== null && 'seconds' in booking.date) {
+      bookingDate = new Date((booking.date as any).seconds * 1000);
+    } else {
+      bookingDate = new Date();
+    }
     return format(bookingDate, 'yyyy-MM-dd') === format(new Date(), 'yyyy-MM-dd');
   });
 
-  // Debug log before analytics render
-  console.log('Dashboard - Pre-render Analytics Check:', {
-    hasAnalytics: !!analytics,
-    analyticsData: analytics,
-    isUserProfileLoaded: !!userProfile,
-    isUserOwner: userProfile?.isOwner,
-    shouldShowAnalytics: userProfile?.isOwner,
-    selectedOrgId: selectedOrg?.id
-  });
+  // Add a debug function
+  const debugRender = () => {
+    console.log('Dashboard - Rendering organization buttons, selectedOrg:', selectedOrg ? {
+      id: selectedOrg.id,
+      name: selectedOrg.name
+    } : 'null');
+  };
+
+  // Call the debug function before rendering
+  debugRender();
 
   if (loading) {
     return (
@@ -189,24 +225,43 @@ export default function Dashboard() {
       }
     >
       <View style={styles.header}>
-        <View>
+        <View style={styles.headerLeft}>
           <Text style={styles.title}>Welcome Back!</Text>
-          <Text style={styles.subtitle}>{auth.currentUser?.email}</Text>
-          {selectedOrg && (
-            <TouchableOpacity 
-              style={styles.organizationButton} 
-              onPress={() => setShowOrgSelector(true)}
-            >
-              <Building2 size={16} color="#007AFF" />
-              <Text style={styles.organizationText}>{selectedOrg.name}</Text>
-              <ChevronDown size={16} color="#007AFF" />
-            </TouchableOpacity>
-          )}
+          <Text style={styles.subtitle}>@{userProfile?.username || ''} {userProfile?.username ? `(${auth.currentUser?.email})` : auth.currentUser?.email}</Text>
+          <View style={styles.organizationButtons}>
+            {selectedOrg ? (
+              <>
+                <TouchableOpacity 
+                  style={styles.organizationButton} 
+                  onPress={() => setShowOrgSelector(true)}
+                >
+                  <Building2 size={16} color="#007AFF" />
+                  <Text style={styles.organizationText}>{selectedOrg.name}</Text>
+                  <ChevronDown size={16} color="#007AFF" />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.editOrgButton}
+                  onPress={() => {
+                    setEditingOrg(selectedOrg);
+                    setShowOrgModal(true);
+                  }}
+                >
+                  <Edit2 size={16} color="#007AFF" />
+                  <Text style={styles.editOrgText}>Edit Organization</Text>
+                </TouchableOpacity>
+              </>
+            ) : (
+              <Text style={styles.noOrgText}>No organization selected</Text>
+            )}
+          </View>
         </View>
         <View style={styles.headerButtons}>
           <TouchableOpacity
             style={styles.createOrgButton}
-            onPress={() => setShowOrgModal(true)}
+            onPress={() => {
+              setEditingOrg(null);
+              setShowOrgModal(true);
+            }}
           >
             <Plus size={20} color="#007AFF" />
             <Text style={styles.createOrgText}>New Organization</Text>
@@ -288,12 +343,18 @@ export default function Dashboard() {
       <UserAccessModal
         visible={showAccessModal}
         onClose={() => setShowAccessModal(false)}
+        organizationId={selectedOrg?.id || ''}
+        currentUserId={auth.currentUser?.uid || ''}
+        users={orgUsers.map(user => ({...user, isOwner: user.isOwner || false}))}
       />
       
       <OrganizationModal
         visible={showOrgModal}
-        onClose={() => setShowOrgModal(false)}
-        organization={selectedOrg}
+        onClose={() => {
+          setShowOrgModal(false);
+          setEditingOrg(null);
+        }}
+        organization={editingOrg}
       />
 
       <Modal
@@ -370,34 +431,60 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     padding: 20,
   },
+  headerLeft: {
+    flex: 1,
+    marginRight: 16,
+  },
   title: {
     fontSize: 24,
     fontWeight: 'bold',
+    marginBottom: 4,
   },
   subtitle: {
     fontSize: 14,
     color: '#666',
-    marginTop: 4,
+    marginBottom: 12,
   },
-  headerButtons: {
+  organizationButtons: {
+    flexDirection: 'column',
     gap: 8,
-    alignItems: 'flex-end',
+    marginTop: 8,
+    width: '100%',
   },
   organizationButton: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#E5F1FF',
     paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+    gap: 8,
     alignSelf: 'flex-start',
-    marginTop: 8,
-    gap: 6,
   },
   organizationText: {
     color: '#007AFF',
     fontSize: 14,
     fontWeight: '500',
+    flex: 1,
+  },
+  editOrgButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#E5F1FF',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    gap: 8,
+    alignSelf: 'flex-start',
+  },
+  editOrgText: {
+    color: '#007AFF',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  headerButtons: {
+    gap: 8,
+    alignItems: 'flex-end',
   },
   createOrgButton: {
     flexDirection: 'row',
@@ -405,8 +492,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#E5F1FF',
     paddingHorizontal: 12,
     paddingVertical: 8,
-    borderRadius: 20,
-    gap: 6,
+    borderRadius: 8,
+    gap: 8,
     minWidth: 160,
   },
   createOrgText: {
@@ -420,8 +507,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#E5F1FF',
     paddingHorizontal: 12,
     paddingVertical: 8,
-    borderRadius: 20,
-    gap: 6,
+    borderRadius: 8,
+    gap: 8,
     minWidth: 160,
   },
   accessButtonText: {
@@ -569,5 +656,12 @@ const styles = StyleSheet.create({
   },
   selectedOrgItemText: {
     color: 'white',
+  },
+  noOrgText: {
+    color: '#666',
+    fontSize: 14,
+    fontStyle: 'italic',
+    textAlign: 'center',
+    padding: 20,
   },
 });

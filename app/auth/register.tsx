@@ -16,7 +16,7 @@ import {
 import { Link, router } from 'expo-router';
 import { Mail, Lock, Check, X } from 'lucide-react-native';
 import { signUp } from '@/lib/firebase/auth';
-import { validateEmail, validatePassword } from '../../lib/validation';
+import { validateEmail, validatePassword, validateUsername } from '../../lib/validation';
 import { StyledIcon } from '@/components/StyledIcon';
 
 export default function Register() {
@@ -49,13 +49,8 @@ export default function Register() {
         return;
       }
 
-      if (username.length < 3) {
-        setError('Username must be at least 3 characters long');
-        return;
-      }
-
-      if (!/^[a-zA-Z0-9_]+$/.test(username)) {
-        setError('Username can only contain letters, numbers, and underscores');
+      if (!validateUsername(username)) {
+        setError('Username must be at least 3 characters long, contain only letters, numbers, and underscores, and cannot look like an email address');
         return;
       }
 
@@ -65,11 +60,21 @@ export default function Register() {
       }
 
       await signUp(email, password, username);
-      Alert.alert(
-        'Registration Successful',
-        'Please check your email to verify your account.',
-        [{ text: 'OK', onPress: () => router.replace('/auth/login') }]
-      );
+      
+      // Use Platform.select to handle alert differently on web vs native
+      if (Platform.OS === 'web') {
+        alert('Registration successful! Please check your email to verify your account.');
+        router.replace('/(tabs)');
+      } else {
+        Alert.alert(
+          'Registration Successful',
+          'Please check your email to verify your account.',
+          [{ 
+            text: 'OK',
+            onPress: () => router.replace('/(tabs)')
+          }]
+        );
+      }
     } catch (error: any) {
       setError(error.message);
     } finally {
@@ -84,16 +89,8 @@ export default function Register() {
       transparent={true}
       onRequestClose={() => setLegalModalVisible(false)}
     >
-      <TouchableOpacity 
-        style={styles.modalOverlay}
-        activeOpacity={1}
-        onPress={() => setLegalModalVisible(false)}
-      >
-        <TouchableOpacity 
-          style={styles.modalContent}
-          activeOpacity={1}
-          onPress={e => e.stopPropagation()}
-        >
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalContent}>
           <View style={styles.modalHeader}>
             <Text style={styles.modalTitle}>Legal Agreements</Text>
             <TouchableOpacity 
@@ -159,8 +156,8 @@ export default function Register() {
               processed as described in our Privacy Policy.
             </Text>
           </ScrollView>
-        </TouchableOpacity>
-      </TouchableOpacity>
+        </View>
+      </View>
     </Modal>
   );
 

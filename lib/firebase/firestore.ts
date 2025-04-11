@@ -15,6 +15,7 @@ import {
   setDoc,
 } from 'firebase/firestore';
 import { db } from './config';
+import { getAuth } from 'firebase/auth';
 
 export interface UserProfile {
   id: string;
@@ -120,6 +121,17 @@ export interface UserPermissions {
   users: {
     manage: boolean;
   };
+}
+
+export interface OrganizationInvite {
+  id: string;
+  organizationId: string;
+  organizationName: string;
+  invitedBy: string;
+  invitedAt: Date;
+  status: 'pending' | 'accepted' | 'rejected';
+  email?: string;
+  userId?: string;
 }
 
 export const createOrganization = async (name: string, ownerId: string) => {
@@ -229,12 +241,8 @@ export const removeUserFromOrganization = async (orgId: string, userId: string) 
       updatedAt: serverTimestamp(),
     });
 
-    // Remove organization from user's list
-    const userRef = doc(db, 'users', userId);
-    await updateDoc(userRef, {
-      organizationIds: arrayRemove(orgId),
-      updatedAt: serverTimestamp(),
-    });
+    // Note: We're not updating the user's document anymore to avoid permission issues
+    // The user will see they're no longer part of the organization when they log in next time
   } catch (error) {
     console.error('Error removing user from organization:', error);
     throw error;
@@ -464,7 +472,7 @@ export const removeCategory = async (organizationId: string, category: string) =
 
 export const subscribeToOrganizationUsers = (
   organizationId: string,
-  callback: (users: Array<{ id: string; email: string; isOwner?: boolean }>) => void
+  callback: (users: Array<{ id: string; email: string; username: string; isOwner?: boolean }>) => void
 ) => {
   const orgRef = doc(db, 'organizations', organizationId);
   
@@ -478,9 +486,11 @@ export const subscribeToOrganizationUsers = (
     const users = await Promise.all(
       orgData.members.map(async (userId: string) => {
         const userDoc = await getDoc(doc(db, 'users', userId));
+        const userData = userDoc.data();
         return {
           id: userId,
-          email: userDoc.data()?.email || '',
+          email: userData?.email || '',
+          username: userData?.username || '',
           isOwner: userId === orgData.ownerId,
         };
       })
@@ -550,6 +560,165 @@ export const checkUsernameAvailability = async (username: string): Promise<boole
   }
 };
 
+export const createOrganizationInvite = async (
+  organizationId: string,
+  email: string,
+  invitedBy: string
+) => {
+  try {
+    const orgRef = doc(db, 'organizations', organizationId);
+    const orgDoc = await getDoc(orgRef);
+    
+    if (!orgDoc.exists()) {
+      throw new Error('Organization not found');
+    }
+
+    const orgData = orgDoc.data();
+    
+    // Check if user already exists
+    const usersByEmail = await getDocs(
+      query(collection(db, 'users'), where('email', '==', email))
+    );
+
+    // Check if invite already exists
+    const existingInvites = await getDocs(
+      query(
+        collection(db, 'organization_invites'), 
+        where('organizationId', '==', organizationId),
+        where('email', '==', email),
+        where('status', '==', 'pending')
+      )
+    );
+
+    if (!existingInvites.empty) {
+      throw new Error('An invitation has already been sent to this email');
+    }
+
+    // Create the invite
+    const inviteData = {
+      organizationId,
+      organizationName: orgData.name,
+      invitedBy,
+      invitedAt: serverTimestamp(),
+      status: 'pending',
+      email,
+      userId: !usersByEmail.empty ? usersByEmail.docs[0].id : null
+    };
+
+    const inviteRef = await addDoc(collection(db, 'organization_invites'), inviteData);
+    
+    // Here you would typically send an email invitation
+    // You'll need to implement email sending functionality
+    
+    return { id: inviteRef.id, ...inviteData };
+  } catch (error) {
+    console.error('Error creating organization invite:', error);
+    throw error;
+  }
+};
+
+export const acceptOrganizationInvite = async (organizationId: string, userId: string) => {
+  try {
+    const pendingInviteRef = doc(db, 'pending_invites', userId);
+    const pendingInviteDoc = await getDoc(pendingInviteRef);
+    
+    if (!pendingInviteDoc.exists()) {
+      throw new Error('No pending invites found');
+    }
+
+    const invites = pendingInviteDoc.data().invites || [];
+    const invite = invites.find(inv => inv.organizationId === organizationId);
+    
+    if (!invite) {
+      throw new Error('Invitation not found');
+    }
+
+    if (invite.status !== 'pending') {
+      throw new Error('This invitation has already been processed');
+    }
+
+    // Add user to organization
+    const orgRef = doc(db, 'organizations', organizationId);
+    await updateDoc(orgRef, {
+      members: arrayUnion(userId),
+      updatedAt: serverTimestamp(),
+    });
+
+    // Update invite status
+    const updatedInvites = invites.map(inv => 
+      inv.organizationId === organizationId 
+        ? { ...inv, status: 'accepted' } 
+        : inv
+    );
+
+    await setDoc(pendingInviteRef, { invites: updatedInvites }, { merge: true });
+
+    return { status: 'accepted' };
+  } catch (error) {
+    console.error('Error accepting organization invite:', error);
+    throw error;
+  }
+};
+
+export const declineOrganizationInvite = async (organizationId: string, userId: string) => {
+  try {
+    const pendingInviteRef = doc(db, 'pending_invites', userId);
+    const pendingInviteDoc = await getDoc(pendingInviteRef);
+    
+    if (!pendingInviteDoc.exists()) {
+      throw new Error('No pending invites found');
+    }
+
+    const invites = pendingInviteDoc.data().invites || [];
+    const invite = invites.find(inv => inv.organizationId === organizationId);
+    
+    if (!invite) {
+      throw new Error('Invitation not found');
+    }
+
+    if (invite.status !== 'pending') {
+      throw new Error('This invitation has already been processed');
+    }
+
+    // Update invite status
+    const updatedInvites = invites.map(inv => 
+      inv.organizationId === organizationId 
+        ? { ...inv, status: 'declined' } 
+        : inv
+    );
+
+    await setDoc(pendingInviteRef, { invites: updatedInvites }, { merge: true });
+
+    return { status: 'declined' };
+  } catch (error) {
+    console.error('Error declining organization invite:', error);
+    throw error;
+  }
+};
+
+export const subscribeToPendingInvites = (userId: string, callback: (invites: Array<{
+  organizationId: string;
+  organizationName: string;
+  invitedBy: string;
+  invitedAt: Date;
+  status: 'pending' | 'accepted' | 'declined';
+}>) => void) => {
+  const pendingInviteRef = doc(db, 'pending_invites', userId);
+  
+  return onSnapshot(pendingInviteRef, (doc) => {
+    if (!doc.exists()) {
+      callback([]);
+      return;
+    }
+
+    const invites = doc.data().invites || [];
+    callback(invites.map(invite => ({
+      ...invite,
+      invitedAt: invite.invitedAt?.toDate() || new Date(),
+    })));
+  });
+};
+
 export const inviteUserToOrganization = async (
   organizationId: string, 
   inviteInput: string,  // Can be either username or email
@@ -591,33 +760,11 @@ export const inviteUserToOrganization = async (
         updatedAt: serverTimestamp(),
       });
 
-      // Add organization to user's list
-      await updateDoc(doc(db, 'users', userId), {
-        organizationIds: arrayUnion(organizationId),
-        updatedAt: serverTimestamp(),
-      });
-
       return { status: 'added', userId };
-    } 
-    // User doesn't exist, send invitation by email
-    else if (inviteInput.includes('@')) {
-      // Create pending invite
-      const inviteData = {
-        email: inviteInput,
-        organizationId,
-        organizationName: orgData.name,
-        invitedBy,
-        invitedAt: serverTimestamp(),
-      };
-
-      await addDoc(collection(db, 'pending_invites'), inviteData);
-      
-      // Here you would typically send an email invitation
-      // You'll need to implement email sending functionality
-      
-      return { status: 'invited', email: inviteInput };
-    } else {
-      throw new Error('User not found and input is not a valid email address');
+    }
+    // User doesn't exist
+    else {
+      throw new Error('User not found. Please make sure the username or email is correct.');
     }
   } catch (error) {
     console.error('Error inviting user to organization:', error);
@@ -645,16 +792,52 @@ export const quitOrganization = async (organizationId: string, userId: string) =
       updatedAt: serverTimestamp(),
     });
 
-    // Remove organization from user's list
-    const userRef = doc(db, 'users', userId);
-    await updateDoc(userRef, {
-      organizationIds: arrayRemove(organizationId),
-      updatedAt: serverTimestamp(),
-    });
+    // Note: We're not updating the user's document anymore to avoid permission issues
+    // The user will see they're no longer part of the organization when they log in next time
 
     return true;
   } catch (error) {
     console.error('Error quitting organization:', error);
+    throw error;
+  }
+};
+
+export const syncUserOrganizations = async (userId: string) => {
+  try {
+    // Get user's profile
+    const userRef = doc(db, 'users', userId);
+    const userDoc = await getDoc(userRef);
+    
+    if (!userDoc.exists()) {
+      console.error('User profile not found');
+      return;
+    }
+
+    const userData = userDoc.data();
+    const currentOrgIds = userData.organizationIds || [];
+
+    // Query organizations where user is a member
+    const orgsRef = collection(db, 'organizations');
+    const q = query(orgsRef, where('members', 'array-contains', userId));
+    const querySnapshot = await getDocs(q);
+    
+    // Get list of organizations user is actually a member of
+    const actualOrgIds = querySnapshot.docs.map(doc => doc.id);
+    
+    // Find organizations to remove (in profile but not in actual memberships)
+    const orgsToRemove = currentOrgIds.filter(id => !actualOrgIds.includes(id));
+    
+    if (orgsToRemove.length > 0) {
+      // Update user profile to remove organizations they're no longer a member of
+      await updateDoc(userRef, {
+        organizationIds: currentOrgIds.filter(id => !orgsToRemove.includes(id)),
+        updatedAt: serverTimestamp()
+      });
+      
+      console.log(`Removed ${orgsToRemove.length} organizations from user profile`);
+    }
+  } catch (error) {
+    console.error('Error syncing user organizations:', error);
     throw error;
   }
 };

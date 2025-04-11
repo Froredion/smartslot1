@@ -26,6 +26,7 @@ interface UserManagementModalProps {
   users: Array<{
     id: string;
     email: string;
+    username: string;
     isOwner?: boolean;
   }>;
 }
@@ -127,7 +128,7 @@ export function UserManagementModal({
                     styles.userEmail,
                     selectedUser === user.id && styles.selectedUserEmail
                   ]}>
-                    {user.email}
+                    @{user.username} ({user.email})
                   </Text>
                   {user.isOwner && (
                     <View style={styles.ownerBadge}>

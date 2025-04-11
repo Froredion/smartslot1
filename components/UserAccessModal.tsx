@@ -3,87 +3,126 @@ import {
   Modal,
   View,
   Text,
-  StyleSheet,
   TouchableOpacity,
+  StyleSheet,
   TextInput,
-  ActivityIndicator,
   ScrollView,
+  ActivityIndicator,
   Switch,
+  Animated,
 } from 'react-native';
-import { StyledIcon } from './StyledIcon';
-import { 
-  updateUserPermissions,
-  subscribeToUserPermissions,
-  type UserPermissions,
-  inviteUserToOrganization,
-  quitOrganization
-} from '../lib/firebase/firestore';
+import { Users, X, UserPlus, AlertCircle, Trash2, Check } from 'lucide-react-native';
+import { inviteUserToOrganization, updateUserPermissions, quitOrganization } from '@/lib/firebase/firestore';
 import { DeleteConfirmationModal } from './DeleteConfirmationModal';
 
 interface User {
   id: string;
   email: string;
-  isOwner?: boolean;
+  username: string;
+  isOwner: boolean;
+}
+
+interface UserPermissions {
+  analytics: {
+    viewEarnings: boolean;
+    viewUnpaidAmount: boolean;
+    viewAgentPayments: boolean;
+  };
+  bookings: {
+    create: boolean;
+    createForOthers: boolean;
+    edit: boolean;
+    editOthers: boolean;
+    delete: boolean;
+    deleteOthers: boolean;
+  };
+  users: {
+    manage: boolean;
+  };
 }
 
 interface UserAccessModalProps {
-  isVisible: boolean;
+  visible: boolean;
   onClose: () => void;
-  organizationId: string;
-  currentUserId: string;
   users: User[];
-  onUserAdded?: () => void;
-  onUserRemoved?: () => void;
+  currentUserId: string;
+  organizationId: string;
 }
 
-export const UserAccessModal: React.FC<UserAccessModalProps> = ({ 
-  isVisible, 
-  onClose, 
-  organizationId,
+export function UserAccessModal({
+  visible,
+  onClose,
+  users,
   currentUserId,
-  users = [],
-  onUserAdded,
-  onUserRemoved 
-}) => {
-  const [inviteInput, setInviteInput] = useState('');
+  organizationId,
+}: UserAccessModalProps) {
+  const [inviteEmail, setInviteEmail] = useState('');
   const [selectedUser, setSelectedUser] = useState<string | null>(null);
-  const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState('');
-  const [userPermissions, setUserPermissions] = useState<UserPermissions | null>(null);
+  const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
+  const [successOpacity] = useState(new Animated.Value(0));
+  const [successTimeout, setSuccessTimeout] = useState<NodeJS.Timeout | null>(null);
+  const [permissions, setPermissions] = useState<UserPermissions>({
+    analytics: {
+      viewEarnings: false,
+      viewUnpaidAmount: false,
+      viewAgentPayments: false,
+    },
+    bookings: {
+      create: true,
+      createForOthers: false,
+      edit: true,
+      editOthers: false,
+      delete: true,
+      deleteOthers: false,
+    },
+    users: {
+      manage: false,
+    },
+  });
 
   useEffect(() => {
-    let unsubscribe: (() => void) | undefined;
-
-    if (selectedUser && organizationId) {
-      unsubscribe = subscribeToUserPermissions(
-        organizationId,
-        selectedUser,
-        (permissions: UserPermissions) => {
-          setUserPermissions(permissions);
-        }
-      );
-    }
-
-    return () => {
-      unsubscribe?.();
-    };
-  }, [selectedUser, organizationId]);
-
-  useEffect(() => {
-    if (!isVisible) {
-      setInviteInput('');
+    if (!visible) {
+      setInviteEmail('');
       setSelectedUser(null);
-      setShowDeleteConfirmation(false);
       setError(null);
       setSuccessMessage('');
     }
-  }, [isVisible]);
+  }, [visible]);
+
+  useEffect(() => {
+    return () => {
+      if (successTimeout) {
+        clearTimeout(successTimeout);
+      }
+    };
+  }, []);
+
+  const showSuccessMessage = (message: string) => {
+    setSuccessMessage(message);
+    
+    successOpacity.setValue(1);
+
+    if (successTimeout) {
+      clearTimeout(successTimeout);
+    }
+
+    const timeout = setTimeout(() => {
+      Animated.timing(successOpacity, {
+        toValue: 0,
+        duration: 500,
+        useNativeDriver: true,
+      }).start(() => setSuccessMessage(''));
+    }, 3000);
+
+    setSuccessTimeout(timeout);
+  };
 
   const handleInviteUser = async () => {
-    if (!inviteInput.trim()) {
-      setError('Please enter a username or email address');
+    if (!inviteEmail.trim()) {
+      setError('Please enter an email address');
       return;
     }
 
@@ -94,18 +133,17 @@ export const UserAccessModal: React.FC<UserAccessModalProps> = ({
     try {
       const result = await inviteUserToOrganization(
         organizationId,
-        inviteInput.trim(),
+        inviteEmail.trim(),
         currentUserId
       );
 
       if (result.status === 'added') {
         setSuccessMessage('User has been added to the organization');
-        if (onUserAdded) onUserAdded();
       } else if (result.status === 'invited') {
         setSuccessMessage('Invitation email has been sent');
       }
 
-      setInviteInput('');
+      setInviteEmail('');
     } catch (err: any) {
       setError(err.message || 'Failed to invite user');
     } finally {
@@ -113,7 +151,23 @@ export const UserAccessModal: React.FC<UserAccessModalProps> = ({
     }
   };
 
-  const handleQuitOrganization = async () => {
+  const handleUpdatePermissions = async () => {
+    if (!selectedUser) return;
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      await updateUserPermissions(organizationId, selectedUser, permissions);
+      showSuccessMessage('User permissions successfully updated');
+    } catch (err: any) {
+      setError(err.message || 'Failed to update permissions');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRemoveUser = async () => {
     if (!selectedUser) return;
 
     setLoading(true);
@@ -123,25 +177,9 @@ export const UserAccessModal: React.FC<UserAccessModalProps> = ({
       await quitOrganization(organizationId, selectedUser);
       setSelectedUser(null);
       setShowDeleteConfirmation(false);
-      if (onUserRemoved) onUserRemoved();
+      setSuccessMessage('User removed successfully');
     } catch (err: any) {
       setError(err.message || 'Failed to remove user');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleUpdatePermissions = async () => {
-    if (!selectedUser || !userPermissions) return;
-
-    setLoading(true);
-    setError(null);
-
-    try {
-      await updateUserPermissions(organizationId, selectedUser, userPermissions);
-      setSuccessMessage('Permissions updated successfully');
-    } catch (err: any) {
-      setError(err.message || 'Failed to update permissions');
     } finally {
       setLoading(false);
     }
@@ -151,7 +189,7 @@ export const UserAccessModal: React.FC<UserAccessModalProps> = ({
 
   return (
     <Modal
-      visible={isVisible}
+      visible={visible}
       transparent
       animationType="slide"
       onRequestClose={onClose}
@@ -161,48 +199,45 @@ export const UserAccessModal: React.FC<UserAccessModalProps> = ({
           <View style={styles.header}>
             <Text style={styles.title}>Manage Access</Text>
             <TouchableOpacity onPress={onClose}>
-              <View style={styles.iconWrapper}>
-                <StyledIcon name="X" size={24} color="#666" />
-              </View>
+              <X size={24} color="#666" />
             </TouchableOpacity>
           </View>
 
-          {error && (
-            <View style={styles.errorContainer}>
-              <View style={styles.errorIconWrapper}>
-                <StyledIcon name="AlertCircle" size={20} color="#FF3B30" />
+          <ScrollView style={styles.scrollContent}>
+            {error && (
+              <View style={styles.errorContainer}>
+                <AlertCircle size={20} color="#FF3B30" />
+                <Text style={styles.errorText}>{error}</Text>
               </View>
-              <Text style={styles.errorText}>{error}</Text>
-            </View>
-          )}
+            )}
 
-          {successMessage && (
-            <View style={styles.successContainer}>
-              <Text style={styles.successText}>{successMessage}</Text>
-            </View>
-          )}
-
-          <ScrollView style={styles.form}>
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Add New User</Text>
-              
-              <View style={styles.inputContainer}>
-                <View style={styles.inputWrapper}>
-                  <View style={styles.inputIconWrapper}>
-                    <StyledIcon name="Mail" size={20} color="#666" />
-                  </View>
-                  <TextInput
-                    style={styles.input}
-                    value={inviteInput}
-                    onChangeText={setInviteInput}
-                    placeholder="Enter username or email"
-                    keyboardType="email-address"
-                    autoCapitalize="none"
-                  />
+            {successMessage && (
+              <Animated.View 
+                style={[
+                  styles.successContainer,
+                  { opacity: successOpacity }
+                ]}
+              >
+                <View style={styles.successContent}>
+                  <Check size={20} color="#34C759" />
+                  <Text style={styles.successText}>{successMessage}</Text>
                 </View>
+              </Animated.View>
+            )}
 
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Invite New User</Text>
+              <View style={styles.inviteContainer}>
+                <TextInput
+                  style={styles.input}
+                  value={inviteEmail}
+                  onChangeText={setInviteEmail}
+                  placeholder="Enter username/email"
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                />
                 <TouchableOpacity
-                  style={[styles.addButton, loading && styles.disabledButton]}
+                  style={[styles.inviteButton, loading && styles.disabledButton]}
                   onPress={handleInviteUser}
                   disabled={loading}
                 >
@@ -210,10 +245,8 @@ export const UserAccessModal: React.FC<UserAccessModalProps> = ({
                     <ActivityIndicator color="white" />
                   ) : (
                     <>
-                      <View style={styles.buttonIconWrapper}>
-                        <StyledIcon name="UserPlus" size={20} color="white" />
-                      </View>
-                      <Text style={styles.addButtonText}>Add User</Text>
+                      <UserPlus size={20} color="white" />
+                      <Text style={styles.inviteButtonText}>Send Invite</Text>
                     </>
                   )}
                 </TouchableOpacity>
@@ -221,8 +254,8 @@ export const UserAccessModal: React.FC<UserAccessModalProps> = ({
             </View>
 
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Current Users</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              <Text style={styles.sectionTitle}>Current Users ({users.length})</Text>
+              <View style={styles.userList}>
                 {users.map(user => (
                   <TouchableOpacity
                     key={user.id}
@@ -233,45 +266,48 @@ export const UserAccessModal: React.FC<UserAccessModalProps> = ({
                     onPress={() => setSelectedUser(user.id)}
                   >
                     <View style={[
-                      styles.userIconWrapper,
-                      selectedUser === user.id && styles.selectedUserIconWrapper
+                      styles.userIcon,
+                      selectedUser === user.id && styles.selectedUserIcon
                     ]}>
-                      <StyledIcon 
-                        name="Users" 
-                        size={24} 
-                        color={selectedUser === user.id ? 'white' : '#666'} 
-                      />
+                      <Users size={24} color={selectedUser === user.id ? 'white' : '#666'} />
                     </View>
-                    <Text style={[
-                      styles.userEmail,
-                      selectedUser === user.id && styles.selectedUserEmail
-                    ]}>
-                      {user.email}
-                    </Text>
-                    {user.isOwner && (
-                      <View style={styles.ownerBadge}>
-                        <Text style={styles.ownerBadgeText}>Owner</Text>
-                      </View>
-                    )}
+                    <View style={styles.userInfo}>
+                      <Text style={[
+                        styles.userEmail,
+                        selectedUser === user.id && styles.selectedUserEmail
+                      ]}>
+                        @{user.username} ({user.email})
+                      </Text>
+                      {user.isOwner && (
+                        <View style={styles.ownerBadge}>
+                          <Text style={styles.ownerBadgeText}>Owner</Text>
+                        </View>
+                      )}
+                      {user.id === currentUserId && !user.isOwner && (
+                        <View style={styles.currentUserBadge}>
+                          <Text style={styles.currentUserBadgeText}>You</Text>
+                        </View>
+                      )}
+                    </View>
                   </TouchableOpacity>
                 ))}
-              </ScrollView>
+              </View>
             </View>
 
-            {selectedUser && userPermissions && selectedUserData && !selectedUserData.isOwner && (
+            {selectedUser && selectedUserData && !selectedUserData.isOwner && (
               <View style={styles.section}>
-                <Text style={styles.sectionTitle}>Permissions</Text>
+                <Text style={styles.sectionTitle}>User Permissions</Text>
                 
-                <View style={styles.permissionSection}>
-                  <Text style={styles.permissionSectionTitle}>Analytics Permissions</Text>
+                <View style={styles.permissionGroup}>
+                  <Text style={styles.permissionGroupTitle}>Analytics</Text>
                   <View style={styles.permissionItem}>
                     <Text style={styles.permissionLabel}>View Earnings</Text>
                     <Switch
-                      value={userPermissions.analytics.viewEarnings}
+                      value={permissions.analytics.viewEarnings}
                       onValueChange={(value) =>
-                        setUserPermissions({
-                          ...userPermissions,
-                          analytics: { ...userPermissions.analytics, viewEarnings: value },
+                        setPermissions({
+                          ...permissions,
+                          analytics: { ...permissions.analytics, viewEarnings: value },
                         })
                       }
                     />
@@ -279,11 +315,11 @@ export const UserAccessModal: React.FC<UserAccessModalProps> = ({
                   <View style={styles.permissionItem}>
                     <Text style={styles.permissionLabel}>View Unpaid Amount</Text>
                     <Switch
-                      value={userPermissions.analytics.viewUnpaidAmount}
+                      value={permissions.analytics.viewUnpaidAmount}
                       onValueChange={(value) =>
-                        setUserPermissions({
-                          ...userPermissions,
-                          analytics: { ...userPermissions.analytics, viewUnpaidAmount: value },
+                        setPermissions({
+                          ...permissions,
+                          analytics: { ...permissions.analytics, viewUnpaidAmount: value },
                         })
                       }
                     />
@@ -291,27 +327,27 @@ export const UserAccessModal: React.FC<UserAccessModalProps> = ({
                   <View style={styles.permissionItem}>
                     <Text style={styles.permissionLabel}>View Agent Payments</Text>
                     <Switch
-                      value={userPermissions.analytics.viewAgentPayments}
+                      value={permissions.analytics.viewAgentPayments}
                       onValueChange={(value) =>
-                        setUserPermissions({
-                          ...userPermissions,
-                          analytics: { ...userPermissions.analytics, viewAgentPayments: value },
+                        setPermissions({
+                          ...permissions,
+                          analytics: { ...permissions.analytics, viewAgentPayments: value },
                         })
                       }
                     />
                   </View>
                 </View>
 
-                <View style={styles.permissionSection}>
-                  <Text style={styles.permissionSectionTitle}>Booking Permissions</Text>
+                <View style={styles.permissionGroup}>
+                  <Text style={styles.permissionGroupTitle}>Bookings</Text>
                   <View style={styles.permissionItem}>
                     <Text style={styles.permissionLabel}>Create Bookings</Text>
                     <Switch
-                      value={userPermissions.bookings.create}
+                      value={permissions.bookings.create}
                       onValueChange={(value) =>
-                        setUserPermissions({
-                          ...userPermissions,
-                          bookings: { ...userPermissions.bookings, create: value },
+                        setPermissions({
+                          ...permissions,
+                          bookings: { ...permissions.bookings, create: value },
                         })
                       }
                     />
@@ -319,11 +355,11 @@ export const UserAccessModal: React.FC<UserAccessModalProps> = ({
                   <View style={styles.permissionItem}>
                     <Text style={styles.permissionLabel}>Create for Others</Text>
                     <Switch
-                      value={userPermissions.bookings.createForOthers}
+                      value={permissions.bookings.createForOthers}
                       onValueChange={(value) =>
-                        setUserPermissions({
-                          ...userPermissions,
-                          bookings: { ...userPermissions.bookings, createForOthers: value },
+                        setPermissions({
+                          ...permissions,
+                          bookings: { ...permissions.bookings, createForOthers: value },
                         })
                       }
                     />
@@ -331,11 +367,11 @@ export const UserAccessModal: React.FC<UserAccessModalProps> = ({
                   <View style={styles.permissionItem}>
                     <Text style={styles.permissionLabel}>Edit Own Bookings</Text>
                     <Switch
-                      value={userPermissions.bookings.edit}
+                      value={permissions.bookings.edit}
                       onValueChange={(value) =>
-                        setUserPermissions({
-                          ...userPermissions,
-                          bookings: { ...userPermissions.bookings, edit: value },
+                        setPermissions({
+                          ...permissions,
+                          bookings: { ...permissions.bookings, edit: value },
                         })
                       }
                     />
@@ -343,11 +379,11 @@ export const UserAccessModal: React.FC<UserAccessModalProps> = ({
                   <View style={styles.permissionItem}>
                     <Text style={styles.permissionLabel}>Edit Others' Bookings</Text>
                     <Switch
-                      value={userPermissions.bookings.editOthers}
+                      value={permissions.bookings.editOthers}
                       onValueChange={(value) =>
-                        setUserPermissions({
-                          ...userPermissions,
-                          bookings: { ...userPermissions.bookings, editOthers: value },
+                        setPermissions({
+                          ...permissions,
+                          bookings: { ...permissions.bookings, editOthers: value },
                         })
                       }
                     />
@@ -355,11 +391,11 @@ export const UserAccessModal: React.FC<UserAccessModalProps> = ({
                   <View style={styles.permissionItem}>
                     <Text style={styles.permissionLabel}>Delete Own Bookings</Text>
                     <Switch
-                      value={userPermissions.bookings.delete}
+                      value={permissions.bookings.delete}
                       onValueChange={(value) =>
-                        setUserPermissions({
-                          ...userPermissions,
-                          bookings: { ...userPermissions.bookings, delete: value },
+                        setPermissions({
+                          ...permissions,
+                          bookings: { ...permissions.bookings, delete: value },
                         })
                       }
                     />
@@ -367,27 +403,27 @@ export const UserAccessModal: React.FC<UserAccessModalProps> = ({
                   <View style={styles.permissionItem}>
                     <Text style={styles.permissionLabel}>Delete Others' Bookings</Text>
                     <Switch
-                      value={userPermissions.bookings.deleteOthers}
+                      value={permissions.bookings.deleteOthers}
                       onValueChange={(value) =>
-                        setUserPermissions({
-                          ...userPermissions,
-                          bookings: { ...userPermissions.bookings, deleteOthers: value },
+                        setPermissions({
+                          ...permissions,
+                          bookings: { ...permissions.bookings, deleteOthers: value },
                         })
                       }
                     />
                   </View>
                 </View>
 
-                <View style={styles.permissionSection}>
-                  <Text style={styles.permissionSectionTitle}>User Management</Text>
+                <View style={styles.permissionGroup}>
+                  <Text style={styles.permissionGroupTitle}>User Management</Text>
                   <View style={styles.permissionItem}>
                     <Text style={styles.permissionLabel}>Manage Users</Text>
                     <Switch
-                      value={userPermissions.users.manage}
+                      value={permissions.users.manage}
                       onValueChange={(value) =>
-                        setUserPermissions({
-                          ...userPermissions,
-                          users: { ...userPermissions.users, manage: value },
+                        setPermissions({
+                          ...permissions,
+                          users: { ...permissions.users, manage: value },
                         })
                       }
                     />
@@ -399,7 +435,7 @@ export const UserAccessModal: React.FC<UserAccessModalProps> = ({
                     style={styles.removeButton}
                     onPress={() => setShowDeleteConfirmation(true)}
                   >
-                    <StyledIcon name="Trash2" size={20} color="white" />
+                    <Trash2 size={20} color="white" />
                     <Text style={styles.buttonText}>Remove User</Text>
                   </TouchableOpacity>
 
@@ -425,41 +461,33 @@ export const UserAccessModal: React.FC<UserAccessModalProps> = ({
                 </Text>
               </View>
             )}
-
-            {!selectedUser && (
-              <View style={styles.noSelection}>
-                <StyledIcon name="Users" size={48} color="#666" />
-                <Text style={styles.noSelectionText}>
-                  Select a user to manage their permissions
-                </Text>
-              </View>
-            )}
           </ScrollView>
         </View>
-
-        <DeleteConfirmationModal
-          visible={showDeleteConfirmation}
-          onClose={() => setShowDeleteConfirmation(false)}
-          onConfirm={handleQuitOrganization}
-          title="Remove User"
-          message={`Are you sure you want to remove ${selectedUserData?.email} from the organization? This action cannot be undone.`}
-        />
       </View>
+
+      <DeleteConfirmationModal
+        visible={showDeleteConfirmation}
+        onClose={() => setShowDeleteConfirmation(false)}
+        onConfirm={handleRemoveUser}
+        title="Remove User"
+        message={`Are you sure you want to remove ${selectedUserData?.email} from the organization? This action cannot be undone.`}
+      />
     </Modal>
   );
-};
+}
 
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'center',
-    padding: 20,
   },
   content: {
     backgroundColor: 'white',
-    borderRadius: 20,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
     maxHeight: '90%',
+    marginTop: 'auto',
   },
   header: {
     flexDirection: 'row',
@@ -473,21 +501,45 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: 'bold',
   },
-  form: {
+  scrollContent: {
     padding: 20,
   },
   section: {
     marginBottom: 24,
   },
   sectionTitle: {
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: '600',
-    marginBottom: 12,
+    marginBottom: 16,
+  },
+  inviteContainer: {
+    gap: 12,
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 16,
+  },
+  inviteButton: {
+    backgroundColor: '#007AFF',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 12,
+    borderRadius: 8,
+    gap: 8,
+  },
+  inviteButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '500',
   },
   errorContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#fee2e2',
+    backgroundColor: '#FFE5E5',
     padding: 12,
     borderRadius: 8,
     marginBottom: 16,
@@ -495,52 +547,32 @@ const styles = StyleSheet.create({
   },
   errorText: {
     flex: 1,
-    color: '#ef4444',
+    color: '#FF3B30',
     fontSize: 14,
   },
   successContainer: {
-    backgroundColor: '#dcfce7',
+    backgroundColor: '#E5FFE5',
     padding: 12,
     borderRadius: 8,
     marginBottom: 16,
+    position: 'absolute',
+    top: 20,
+    left: 20,
+    right: 20,
+    zIndex: 100,
   },
-  successText: {
-    color: '#16a34a',
-  },
-  inputContainer: {
-    gap: 12,
-  },
-  inputWrapper: {
+  successContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#f5f5f5',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-  },
-  inputIconWrapper: {
-    marginRight: 8,
-  },
-  input: {
-    flex: 1,
-    paddingVertical: 12,
-    fontSize: 16,
-  },
-  addButton: {
-    backgroundColor: '#007AFF',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 16,
-    borderRadius: 12,
     gap: 8,
   },
-  disabledButton: {
-    backgroundColor: '#999',
+  successText: {
+    color: '#34C759',
+    fontSize: 14,
+    flex: 1,
   },
-  addButtonText: {
-    color: 'white',
-    fontSize: 16,
-    fontWeight: '600',
+  userList: {
+    gap: 8,
   },
   userCard: {
     flexDirection: 'row',
@@ -548,34 +580,64 @@ const styles = StyleSheet.create({
     backgroundColor: '#f8f9fa',
     padding: 12,
     borderRadius: 12,
-    marginRight: 12,
     gap: 8,
   },
   selectedUserCard: {
     backgroundColor: '#007AFF',
   },
+  userIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#e9ecef',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  selectedUserIcon: {
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  userInfo: {
+    flex: 1,
+  },
   userEmail: {
-    fontSize: 14,
+    fontSize: 16,
     color: '#333',
   },
   selectedUserEmail: {
     color: 'white',
   },
   ownerBadge: {
-    backgroundColor: '#34C759',
+    backgroundColor: '#ffd700',
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 12,
+    alignSelf: 'flex-start',
+    marginTop: 4,
   },
   ownerBadgeText: {
-    color: 'white',
+    color: '#333',
     fontSize: 12,
-    fontWeight: '500',
+    fontWeight: 'bold',
   },
-  permissionSection: {
-    marginBottom: 24,
+  currentUserBadge: {
+    backgroundColor: '#e9ecef',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    alignSelf: 'flex-start',
+    marginTop: 4,
   },
-  permissionSectionTitle: {
+  currentUserBadgeText: {
+    color: '#666',
+    fontSize: 12,
+  },
+  permissionGroup: {
+    backgroundColor: '#f8f9fa',
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 16,
+  },
+  permissionGroupTitle: {
     fontSize: 16,
     fontWeight: '600',
     color: '#007AFF',
@@ -604,8 +666,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 16,
-    borderRadius: 12,
+    padding: 12,
+    borderRadius: 8,
     gap: 8,
   },
   saveButton: {
@@ -614,14 +676,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 16,
-    borderRadius: 12,
-    gap: 8,
+    padding: 12,
+    borderRadius: 8,
+  },
+  disabledButton: {
+    backgroundColor: '#999',
   },
   buttonText: {
     color: 'white',
-    fontSize: 16,
-    fontWeight: '600',
+    fontSize: 14,
+    fontWeight: '500',
   },
   ownerMessage: {
     backgroundColor: '#E5F1FF',
@@ -633,34 +697,5 @@ const styles = StyleSheet.create({
     color: '#007AFF',
     fontSize: 14,
     textAlign: 'center',
-  },
-  noSelection: {
-    alignItems: 'center',
-    padding: 32,
-    gap: 16,
-  },
-  noSelectionText: {
-    color: '#666',
-    fontSize: 16,
-    textAlign: 'center',
-  },
-  iconWrapper: {
-    padding: 8,
-  },
-  errorIconWrapper: {
-    marginRight: 8,
-  },
-  buttonIconWrapper: {
-    marginRight: 8,
-  },
-  userIconWrapper: {
-    padding: 4,
-  },
-  selectedUserIconWrapper: {
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    borderRadius: 8,
-  },
-  noSelectionIconWrapper: {
-    padding: 16,
   },
 });

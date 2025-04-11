@@ -20,23 +20,42 @@ import {
   getDocs,
 } from 'firebase/firestore';
 import { db } from './config';
-import { checkUsernameAvailability } from './firestore';
+import { checkUsernameAvailability, syncUserOrganizations } from './firestore';
+import { looksLikeEmail } from '../validation';
 
 export const signUp = async (email: string, password: string, username: string) => {
   try {
+    console.log('signUp - Starting registration process');
+    console.log('signUp - Email:', email);
+    console.log('signUp - Username:', username);
+    console.log('signUp - Password length:', password.length);
+
+    // Log username validation
+    console.log('signUp - Username validation:', {
+      isString: typeof username === 'string',
+      length: username.length >= 3,
+      matches: /^[a-zA-Z0-9_]+$/.test(username)
+    });
+
     // Check username availability first
     const isUsernameAvailable = await checkUsernameAvailability(username);
+    console.log('signUp - isUsernameAvailable:', isUsernameAvailable);
+    
     if (!isUsernameAvailable) {
+      console.log('signUp - Username is already taken');
       throw new Error('Username is already taken');
     }
 
+    console.log('signUp - Creating user with Firebase Auth');
     const userCredential = await createUserWithEmailAndPassword(
       auth,
       email,
       password
     );
+    console.log('signUp - User created successfully with ID:', userCredential.user.uid);
 
     try {
+      console.log('signUp - Creating default organization');
       // Create default organization first
       const orgRef = await addDoc(collection(db, 'organizations'), {
         name: 'My Organization',
@@ -47,14 +66,17 @@ export const signUp = async (email: string, password: string, username: string) 
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
+      console.log('signUp - Organization created successfully with ID:', orgRef.id);
 
+      console.log('signUp - Creating user profile');
       // Create user profile in Firestore
       await setDoc(doc(db, 'users', userCredential.user.uid), {
         email: userCredential.user.email || '',
         username: username,
+        usernameLower: username.toLowerCase(),
         displayName: '',
-        organizationIds: [orgRef.id], // Store organization IDs array
-        isOwner: true, // First user is always owner of their org
+        organizationIds: [orgRef.id],
+        isOwner: true,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
         preferences: {
@@ -63,6 +85,7 @@ export const signUp = async (email: string, password: string, username: string) 
           currency: 'USD',
         },
       });
+      console.log('signUp - User profile created successfully');
     } catch (profileError) {
       console.error('Error creating user profile:', profileError);
       // Continue with registration even if profile creation fails
@@ -71,16 +94,23 @@ export const signUp = async (email: string, password: string, username: string) 
 
     // Send verification email
     try {
+      console.log('signUp - Sending verification email');
       await sendEmailVerification(userCredential.user);
+      console.log('signUp - Verification email sent successfully');
     } catch (verificationError) {
       console.error('Error sending verification email:', verificationError);
       // Continue with registration even if email verification fails
       // User can request verification email later
     }
 
+    console.log('signUp - Registration completed successfully');
     return userCredential.user;
   } catch (error: any) {
-    console.error('Registration error:', error);
+    console.error('Registration error:', {
+      code: error.code,
+      message: error.message,
+      fullError: error
+    });
     let message = 'An error occurred during registration';
     if (error.code === 'auth/email-already-in-use') {
       message = 'This email is already registered';
@@ -97,28 +127,69 @@ export const signUp = async (email: string, password: string, username: string) 
 
 export const signIn = async (emailOrUsername: string, password: string) => {
   try {
+    console.log('signIn - Starting login process');
+    console.log('signIn - Input:', emailOrUsername);
+    
     let email = emailOrUsername;
 
-    // If the input doesn't contain '@', assume it's a username
-    if (!emailOrUsername.includes('@')) {
-      // Query Firestore to get the email associated with the username
+    // Check if the input looks like an email first
+    const isEmail = looksLikeEmail(emailOrUsername);
+    console.log('signIn - Is email?', isEmail);
+
+    if (!isEmail) {
+      console.log('signIn - Attempting username login');
+      // If not an email, query Firestore to get the email associated with the username
       const usersRef = collection(db, 'users');
-      const q = query(usersRef, where('username', '==', emailOrUsername));
-      const querySnapshot = await getDocs(q);
+      
+      // Convert username to lowercase for case-insensitive comparison
+      const lowercaseUsername = emailOrUsername.toLowerCase();
+      console.log('signIn - Converting username to lowercase:', lowercaseUsername);
+      
+      // Try to find the user by username (case-sensitive first)
+      let q = query(usersRef, where('username', '==', emailOrUsername));
+      let querySnapshot = await getDocs(q);
+      
+      // If not found, try case-insensitive search using usernameLower field
+      if (querySnapshot.empty) {
+        console.log('signIn - No exact match found, trying case-insensitive search');
+        q = query(usersRef, where('usernameLower', '==', lowercaseUsername));
+        querySnapshot = await getDocs(q);
+      }
+      
+      console.log('signIn - Username query results:', {
+        empty: querySnapshot.empty,
+        size: querySnapshot.size,
+        docs: querySnapshot.docs.map(doc => ({ 
+          id: doc.id, 
+          username: doc.data().username,
+          email: doc.data().email 
+        }))
+      });
 
       if (querySnapshot.empty) {
+        console.log('signIn - No user found with username:', emailOrUsername);
         throw new Error('Invalid username or password');
       }
 
       const userDoc = querySnapshot.docs[0];
-      email = userDoc.data().email;
+      const userData = userDoc.data();
+      console.log('signIn - User data found:', {
+        id: userDoc.id,
+        username: userData.username,
+        email: userData.email
+      });
+      
+      email = userData.email;
+      console.log('signIn - Found email for username:', email);
     }
 
+    console.log('signIn - Attempting Firebase auth with email:', email);
     const userCredential = await signInWithEmailAndPassword(
       auth,
       email,
       password
     );
+    console.log('signIn - Login successful for user:', userCredential.user.uid);
 
     try {
       // Check if user profile exists
@@ -126,6 +197,7 @@ export const signIn = async (emailOrUsername: string, password: string) => {
       const userDoc = await getDoc(userRef);
 
       if (!userDoc.exists()) {
+        console.log('signIn - Creating default profile for user');
         // Create default organization if user doesn't have a profile
         const orgRef = await addDoc(collection(db, 'organizations'), {
           name: 'My Organization',
@@ -141,8 +213,8 @@ export const signIn = async (emailOrUsername: string, password: string) => {
         await setDoc(userRef, {
           email: userCredential.user.email || '',
           displayName: '',
-          organizationIds: [orgRef.id], // Store organization IDs array
-          isOwner: true, // First user is always owner of their org
+          organizationIds: [orgRef.id],
+          isOwner: true,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
           preferences: {
@@ -151,6 +223,11 @@ export const signIn = async (emailOrUsername: string, password: string) => {
             currency: 'USD',
           },
         });
+        console.log('signIn - Default profile created');
+      } else {
+        console.log('signIn - Existing profile found, syncing organizations');
+        // Sync user's organizations with their profile
+        await syncUserOrganizations(userCredential.user.uid);
       }
     } catch (profileError) {
       console.error('Error checking/creating user profile:', profileError);
@@ -159,7 +236,11 @@ export const signIn = async (emailOrUsername: string, password: string) => {
 
     return userCredential.user;
   } catch (error: any) {
-    console.error('Login error:', error);
+    console.error('Login error:', {
+      code: error.code,
+      message: error.message,
+      fullError: error
+    });
     let message = 'Invalid username/email or password';
     if (
       error.code === 'auth/user-not-found' ||

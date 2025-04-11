@@ -16,13 +16,13 @@ import { signIn } from '@/lib/firebase/auth';
 import { StyledIcon } from '@/components/StyledIcon';
 
 export default function Login() {
-  const [email, setEmail] = useState('');
+  const [emailOrUsername, setEmailOrUsername] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const handleLogin = async () => {
-    if (!email || !password) {
+    if (!emailOrUsername || !password) {
       setError('Please fill in all fields');
       return;
     }
@@ -31,7 +31,7 @@ export default function Login() {
     setError(null);
 
     try {
-      await signIn(email, password);
+      await signIn(emailOrUsername, password);
       router.replace('/(tabs)');
     } catch (err: any) {
       setError(err.message);
@@ -69,8 +69,8 @@ export default function Login() {
               <TextInput
                 style={styles.input}
                 placeholder="Username or Email"
-                value={email}
-                onChangeText={setEmail}
+                value={emailOrUsername}
+                onChangeText={setEmailOrUsername}
                 autoCapitalize="none"
                 autoCorrect={false}
               />

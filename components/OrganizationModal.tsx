@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { X, AlertCircle, Building2 } from 'lucide-react-native';
 import { createOrganization, updateOrganization, Organization } from '@/lib/firebase/firestore';
+import { auth } from '@/lib/firebase/config';
 
 interface OrganizationModalProps {
   visible: boolean;
@@ -43,7 +44,7 @@ export function OrganizationModal({ visible, onClose, organization }: Organizati
       if (organization) {
         await updateOrganization(organization.id, { name: name.trim() });
       } else {
-        await createOrganization(name.trim());
+        await createOrganization(name.trim(), auth.currentUser!.uid);
       }
       onClose();
     } catch (err: any) {
