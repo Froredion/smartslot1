@@ -7,7 +7,7 @@ import {
   subscribeToBookings, 
   subscribeToAnalytics, 
   subscribeToActivityLogs, 
-  subscribeToUserProfile, 
+  subscribeToUserProfile,
   subscribeToOrganizations,
   subscribeToOrganizationUsers,
   type Organization,
@@ -16,10 +16,11 @@ import {
   type Booking,
   type Analytics,
   type ActivityLog,
-} from '../../lib/firebase/firestore';
+} from '@/lib/firebase/firestore';
 import { auth } from '@/lib/firebase/config';
-import { UserAccessModal } from '@/components/UserAccessModal';
+import { UserAccessModal } from '@/components/UserAccess';
 import { OrganizationModal } from '@/components/OrganizationModal';
+import { OrganizationSelector } from '@/components/OrganizationSelector';
 import { Building2, Plus, ChevronDown, ChevronRight, CreditCard as Edit2, Users } from 'lucide-react-native';
 import { router } from 'expo-router';
 
@@ -357,56 +358,26 @@ export default function Dashboard() {
         organization={editingOrg}
       />
 
-      <Modal
+      <OrganizationSelector
         visible={showOrgSelector}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setShowOrgSelector(false)}
-      >
-        <TouchableOpacity 
-          style={styles.modalOverlay}
-          activeOpacity={1}
-          onPress={() => setShowOrgSelector(false)}
-        >
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Select Organization</Text>
-              <TouchableOpacity onPress={() => setShowOrgSelector(false)}>
-                <ChevronDown size={24} color="#666" />
-              </TouchableOpacity>
-            </View>
-            <ScrollView style={styles.orgList}>
-              {organizations.map(org => (
-                <TouchableOpacity
-                  key={org.id}
-                  style={[
-                    styles.orgItem,
-                    selectedOrg?.id === org.id && styles.selectedOrgItem
-                  ]}
-                  onPress={() => {
-                    setSelectedOrg(org);
-                    setShowOrgSelector(false);
-                  }}
-                >
-                  <Building2 
-                    size={20} 
-                    color={selectedOrg?.id === org.id ? 'white' : '#666'} 
-                  />
-                  <Text style={[
-                    styles.orgItemText,
-                    selectedOrg?.id === org.id && styles.selectedOrgItemText
-                  ]}>
-                    {org.name}
-                  </Text>
-                  {selectedOrg?.id === org.id && (
-                    <ChevronRight size={20} color="white" />
-                  )}
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
-        </TouchableOpacity>
-      </Modal>
+        onClose={() => setShowOrgSelector(false)}
+        organizations={organizations}
+        selectedOrg={selectedOrg}
+        onSelectOrg={(org) => {
+          setSelectedOrg(org);
+          setShowOrgSelector(false);
+        }}
+        onCreateOrg={() => {
+          setEditingOrg(null);
+          setShowOrgModal(true);
+          setShowOrgSelector(false);
+        }}
+        onEditOrg={(org) => {
+          setEditingOrg(org);
+          setShowOrgModal(true);
+          setShowOrgSelector(false);
+        }}
+      />
     </ScrollView>
   );
 }

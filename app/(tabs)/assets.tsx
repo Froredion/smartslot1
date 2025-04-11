@@ -2,9 +2,9 @@ import { View, Text, StyleSheet, FlatList, TouchableOpacity, ScrollView, Activit
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Plus, AlertCircle } from 'lucide-react-native';
 import { useState, useEffect } from 'react';
-import { AssetEditModal } from '../../components/AssetEditModal';
-import { CategoryManager } from '../../components/CategoryManager';
-import { auth } from '../../lib/firebase/config';
+import { AssetEditModal } from '@/components/AssetEditModal';
+import { CategoryManager } from '@/components/CategoryManager';
+import { auth } from '@/lib/firebase/config';
 import { 
   subscribeToUserProfile, 
   subscribeToOrganizations,
@@ -14,8 +14,10 @@ import {
   deleteAsset,
   addCategory,
   removeCategory,
-  type Asset 
-} from '../../lib/firebase/firestore';
+  type Asset,
+  subscribeToBookings,
+  type Booking
+} from '@/lib/firebase/firestore';
 
 export default function Assets() {
   const insets = useSafeAreaInsets();

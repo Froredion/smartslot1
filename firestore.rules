@@ -40,25 +40,43 @@ service cloud.firestore {
         resource.data.members.hasAny([request.auth.uid])
       );
       allow create: if isAuthenticated();
-      allow update, delete: if isOrgOwner(orgId);
+      allow update: if isOrgOwner(orgId) || (
+        // Allow members to update only the members array to remove themselves
+        isOrgMember(orgId) &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members', 'updatedAt']) &&
+        request.resource.data.members.size() == resource.data.members.size() - 1 &&
+        !request.resource.data.members.hasAny([request.auth.uid])
+      ) || (
+        // Allow users to add themselves when accepting an invite
+        !isOrgMember(orgId) &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members', 'updatedAt']) &&
+        request.resource.data.members.size() == resource.data.members.size() + 1 &&
+        request.resource.data.members.hasAny([request.auth.uid]) &&
+        exists(/databases/$(database)/documents/pending_invites/$(request.auth.uid))
+      );
+      allow delete: if isOrgOwner(orgId);
 
       // Analytics subcollection
       match /analytics/{docId} {
-        allow read: if isOrgMember(orgId) && 
-          get(/databases/$(database)/documents/organizations/$(orgId)/user_permissions/$(request.auth.uid)).data.analytics.viewEarnings;
+        allow read: if (isOrgMember(orgId) && 
+          get(/databases/$(database)/documents/organizations/$(orgId)/user_permissions/$(request.auth.uid)).data.analytics.view) || 
+          isOrgOwner(orgId);
         allow write: if isOrgOwner(orgId);
+        allow delete: if isOrgOwner(orgId) || 
+          // Also allow delete if the parent organization is being deleted
+          (!exists(/databases/$(database)/documents/organizations/$(orgId)) && request.auth.uid == resource.data.ownerId);
       }
 
       // User permissions subcollection
       match /user_permissions/{userId} {
         allow read: if isOrgMember(orgId);
-        allow write: if isOrgOwner(orgId);
+        allow write, delete: if isOrgOwner(orgId);
       }
 
       // Assets subcollection
       match /assets/{assetId} {
         allow read: if isOrgMember(orgId);
-        allow write: if isOrgOwner(orgId) || 
+        allow write, delete: if isOrgOwner(orgId) || 
           get(/databases/$(database)/documents/organizations/$(orgId)/user_permissions/$(request.auth.uid)).data.assets.manage;
       }
 
@@ -72,21 +90,18 @@ service cloud.firestore {
            get(/databases/$(database)/documents/organizations/$(orgId)/user_permissions/$(request.auth.uid)).data.bookings.edit) ||
           get(/databases/$(database)/documents/organizations/$(orgId)/user_permissions/$(request.auth.uid)).data.bookings.editOthers
         );
-        allow delete: if isOrgMember(orgId) && (
+        allow delete: if isOrgOwner(orgId) || (isOrgMember(orgId) && (
           (resource.data.bookedBy == request.auth.uid && 
            get(/databases/$(database)/documents/organizations/$(orgId)/user_permissions/$(request.auth.uid)).data.bookings.delete) ||
           get(/databases/$(database)/documents/organizations/$(orgId)/user_permissions/$(request.auth.uid)).data.bookings.deleteOthers
-        );
+        ));
       }
     }
 
     // Users collection
     match /users/{userId} {
       // Allow reading user profiles for authentication and user lookup
-      allow read: if isAuthenticated() || 
-                 // Allow reading username and email for login purposes
-                 (request.method == 'get' && 
-                  resource.data.keys().hasAll(['username', 'email']));
+      allow read: if true;  // Allow reading user documents for login purposes
       
       // Allow users to create their own profile
       allow create: if isAuthenticated() && 
@@ -109,18 +124,31 @@ service cloud.firestore {
     // Pending invites collection
     match /pending_invites/{userId} {
       // Allow users to read their own pending invites
-      allow read: if request.auth.uid == userId;
+      allow read: if true;
       
-      // Allow organization members to create invites for others
-      allow create: if 
-        exists(/databases/$(database)/documents/organizations/$(request.resource.data.organizationId)) &&
-        get(/databases/$(database)/documents/organizations/$(request.resource.data.organizationId)).data.members.hasAny([request.auth.uid]);
+      // Allow anyone to create invites
+      allow create: if isAuthenticated();
       
-      // Allow users to update/delete their own pending invites
-      allow update, delete: if request.auth.uid == userId;
+      // Allow updates to invites
+      allow update: if isAuthenticated() && (
+        // Allow the invited user to update their own invites
+        request.auth.uid == userId ||
+        // Allow anyone to add new invites
+        request.resource.data.invites.size() > resource.data.invites.size() ||
+        // Allow organization members to update invites
+        get(/databases/$(database)/documents/organizations/$(resource.data.invites[0].organizationId)).data.members.hasAny([request.auth.uid])
+      );
+      
+      // Allow users to delete their own pending invites
+      allow delete: if isAuthenticated() && (
+        // Allow delete if user is the one invited
+        request.auth.uid == userId ||
+        // Allow delete if user is a member of the organization
+        get(/databases/$(database)/documents/organizations/$(resource.data.organizationId)).data.members.hasAny([request.auth.uid])
+      );
     }
 
-    // Organization invites collection
+    // Organization invites collection (for email invites)
     match /organization_invites/{inviteId} {
       allow read: if isAuthenticated() && (
         // Allow read if user is the one invited
@@ -130,21 +158,29 @@ service cloud.firestore {
         // Allow read if user is a member of the organization
         get(/databases/$(database)/documents/organizations/$(resource.data.organizationId)).data.members.hasAny([request.auth.uid])
       );
+      
+      // Allow members to create invites
       allow create: if isAuthenticated() && (
         // Allow create if user is a member of the organization
         get(/databases/$(database)/documents/organizations/$(request.resource.data.organizationId)).data.members.hasAny([request.auth.uid])
       );
+      
       allow update: if isAuthenticated() && (
         // Allow update if user is the one invited
         resource.data.email == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.email ||
         // Allow update if user is the one who sent the invite
-        resource.data.invitedBy == request.auth.uid
+        resource.data.invitedBy == request.auth.uid ||
+        // Allow update if user is a member of the organization
+        get(/databases/$(database)/documents/organizations/$(resource.data.organizationId)).data.members.hasAny([request.auth.uid])
       );
+      
       allow delete: if isAuthenticated() && (
         // Allow delete if user is the one who sent the invite
         resource.data.invitedBy == request.auth.uid ||
         // Allow delete if user is the organization owner
-        get(/databases/$(database)/documents/organizations/$(resource.data.organizationId)).data.ownerId == request.auth.uid
+        get(/databases/$(database)/documents/organizations/$(resource.data.organizationId)).data.ownerId == request.auth.uid ||
+        // Allow delete if user is a member of the organization
+        get(/databases/$(database)/documents/organizations/$(resource.data.organizationId)).data.members.hasAny([request.auth.uid])
       );
     }
   }

@@ -145,26 +145,43 @@ export const signIn = async (emailOrUsername: string, password: string) => {
       const lowercaseUsername = emailOrUsername.toLowerCase();
       console.log('signIn - Converting username to lowercase:', lowercaseUsername);
       
+      // Log the query we're about to make
+      console.log('signIn - Query parameters:', {
+        collection: 'users',
+        field: 'username',
+        value: emailOrUsername,
+        queryType: 'exact match'
+      });
+
       // Try to find the user by username (case-sensitive first)
       let q = query(usersRef, where('username', '==', emailOrUsername));
       let querySnapshot = await getDocs(q);
       
+      console.log('signIn - First query results:', {
+        empty: querySnapshot.empty,
+        size: querySnapshot.size,
+        error: null
+      });
+      
       // If not found, try case-insensitive search using usernameLower field
       if (querySnapshot.empty) {
         console.log('signIn - No exact match found, trying case-insensitive search');
+        console.log('signIn - Case-insensitive query parameters:', {
+          collection: 'users',
+          field: 'usernameLower',
+          value: lowercaseUsername,
+          queryType: 'case insensitive'
+        });
+
         q = query(usersRef, where('usernameLower', '==', lowercaseUsername));
         querySnapshot = await getDocs(q);
+        
+        console.log('signIn - Case-insensitive query results:', {
+          empty: querySnapshot.empty,
+          size: querySnapshot.size,
+          error: null
+        });
       }
-      
-      console.log('signIn - Username query results:', {
-        empty: querySnapshot.empty,
-        size: querySnapshot.size,
-        docs: querySnapshot.docs.map(doc => ({ 
-          id: doc.id, 
-          username: doc.data().username,
-          email: doc.data().email 
-        }))
-      });
 
       if (querySnapshot.empty) {
         console.log('signIn - No user found with username:', emailOrUsername);
@@ -194,6 +211,7 @@ export const signIn = async (emailOrUsername: string, password: string) => {
     try {
       // Check if user profile exists
       const userRef = doc(db, 'users', userCredential.user.uid);
+      console.log('signIn - Checking user profile:', userCredential.user.uid);
       const userDoc = await getDoc(userRef);
 
       if (!userDoc.exists()) {
@@ -230,7 +248,11 @@ export const signIn = async (emailOrUsername: string, password: string) => {
         await syncUserOrganizations(userCredential.user.uid);
       }
     } catch (profileError) {
-      console.error('Error checking/creating user profile:', profileError);
+      console.error('Error checking/creating user profile:', {
+        code: profileError.code,
+        message: profileError.message,
+        fullError: profileError
+      });
       // Continue with sign in even if profile check/creation fails
     }
 

@@ -1,0 +1,9 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+### ✅ **LLM Prompt Instruction Rule for Clean Component Design**
+
+> **Follow these coding rules for all components:**
+> 1. **No component file should exceed 300 lines**. If it does, split into subcomponents or hooks.
